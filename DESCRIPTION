@@ -1,12 +1,15 @@
 Package: pwtest
-Title: What the Package Does (One Line, Title Case)
+Title: Prognosis-Weighted Test
 Version: 0.0.0.9000
 Authors@R: 
-    person("First", "Last", , "first.last@example.com", role = c("aut", "cre"),
-           comment = c(ORCID = "YOUR-ORCID-ID"))
-Description: What the package does (one paragraph).
-License: `use_mit_license()`, `use_gpl3_license()` or friends to pick a
-    license
+    c(person("Clara", "Bicalho", , "clarabmcorreia@gmail.com", role = c("aut", "cre"),
+           comment = c(ORCID = "0000-0002-9298-550X")),
+    person("Thad", "Dunning", , "thad.dunning@berkeley.edu", role = c("aut"),
+           comment = c(ORCID = "")),
+    person("Adam", "Bouyamourn", , "adam.bouyamourn@berkeley.edu", role = c("aut"),
+           comment = c(ORCID = "")))
+Description: This package and function by the same name implements a prognosis-weighted global test of independence of treatment assignment and potential outcomes.
+License: MIT + file LICENSE
 Encoding: UTF-8
 Roxygen: list(markdown = TRUE)
 RoxygenNote: 7.2.3
