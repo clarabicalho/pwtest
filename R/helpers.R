@@ -2,6 +2,11 @@
 # regression on control units
 # Returns vector of labelled covariate (prognosis) weights
 
+#' @importFrom stats sd mean
+stdr <- function(x){
+  (x - mean(x, na.rm = TRUE))/(sd(x, na.rm = TRUE)*(length(x)-1)/length(x))
+}
+
 pw <- function(data, covariates, treatment, outcome, standardize, simulation){
 
   # listwise deletion of observations with missing values
