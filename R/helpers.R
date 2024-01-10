@@ -2,11 +2,23 @@
 # regression on control units
 # Returns vector of labelled covariate (prognosis) weights
 
-#' @importFrom stats sd mean
+#' @importFrom stats sd
 stdr <- function(x){
   (x - mean(x, na.rm = TRUE))/(sd(x, na.rm = TRUE)*(length(x)-1)/length(x))
 }
 
+#'Calculates prognosis weights from observed control-group sample
+#' @param data data.frame containing covariates, treatment assignment, and outcome variable
+#' @param covariates character vector of covariate names
+#' @param treatment name of variable indicating (binary) treatment assigned
+#' @param outcome name of outcome variable
+#' @param standardize whether to standardize data inside function
+#' @param simulation logical. Whether running the function on bootstrap sample
+#' @importFrom magrittr %>%
+#' @importFrom tidyr drop_na
+#' @importFrom tidyselect all_of
+#' @importFrom dplyr mutate_at filter
+#' @importFrom stats coef var lm
 pw <- function(data, covariates, treatment, outcome, standardize, simulation){
 
   # listwise deletion of observations with missing values
@@ -53,7 +65,11 @@ pw <- function(data, covariates, treatment, outcome, standardize, simulation){
 #' @param treatment name of variable indicating (binary) treatment assigned
 #' @param outcome name of outcome variable
 #' @param standardize whether to standardize data inside function
-
+#' @param simulation logical. Whether running the function on bootstrap sample
+#' @importFrom magrittr %>%
+#' @importFrom tidyr drop_na
+#' @importFrom tidyselect all_of
+#' @importFrom stats cov var complete.cases
 uw_delta <- function(data, covariates, treatment, outcome, standardize = TRUE, simulation = FALSE){
 
   # drop if missing treatment value
@@ -123,6 +139,7 @@ uw_delta <- function(data, covariates, treatment, outcome, standardize = TRUE, s
 #' @param outcome name of outcome variable
 #' @param standardize whether to standardize data inside function
 #' @param DIM difference in covariate means across treatment and control from `uw_delta()`
+#' @param simulation logical. Whether running the function on bootstrap sample
 
 pw_delta <- function(data, covariates, treatment, outcome, standardize = TRUE,
                      DIM, simulation = FALSE){
@@ -146,8 +163,8 @@ pw_delta <- function(data, covariates, treatment, outcome, standardize = TRUE,
 #' @param running_var character string with running variable name
 #' @param treatment name of variable indicating (binary) treatment assigned
 #' @param outcome name of outcome variable
-#' @param standardize whether to standardize data inside function
-#' @param simulation
+#' @param standardize logical. Whether to standardize data inside function
+#' @param simulation logical. Whether running the function on bootstrap sample
 #' @param rd_estimator character. Whether to use the conventional ("h") or the bias-corrected local-polynomial point estimator ("b"). See `rdrobust()` for more details. Defaults to conventional estimate ("h").
 #' @param ... arguments passed on to `rdrobust` function. If `rdrobust()` arguments `y` and `covs` are not specified, they will take the values of the variables defined by `outcome` and `covariates`, respectively. All other arguments, if not specified, will take the default values in `rdrobust()`
 

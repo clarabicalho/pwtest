@@ -26,6 +26,8 @@ pw_delta(
 \item{standardize}{whether to standardize data inside function}
 
 \item{DIM}{difference in covariate means across treatment and control from \code{uw_delta()}}
+
+\item{simulation}{logical. Whether running the function on bootstrap sample}
 }
 \description{
 Calculates prognosis-weighted delta

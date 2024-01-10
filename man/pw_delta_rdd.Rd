@@ -27,7 +27,9 @@ pw_delta_rdd(
 
 \item{outcome}{name of outcome variable}
 
-\item{standardize}{whether to standardize data inside function}
+\item{standardize}{logical. Whether to standardize data inside function}
+
+\item{simulation}{logical. Whether running the function on bootstrap sample}
 
 \item{rd_estimator}{character. Whether to use the conventional ("h") or the bias-corrected local-polynomial point estimator ("b"). See \code{rdrobust()} for more details. Defaults to conventional estimate ("h").}
 

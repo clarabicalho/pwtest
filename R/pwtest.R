@@ -12,6 +12,7 @@
 #' @param rd_estimator character. Whether to use the conventional ("h") or the bias-corrected local-polynomial point estimator ("b"). See `rdrobust()` for more details. Defaults to conventional estimate ("h").
 #' @param ... arguments passed onto `rdrobust()` function
 #' @import rdrobust
+#' @importFrom stats pnorm
 #' @export
 
 pwtest <- function(data,
