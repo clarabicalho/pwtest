@@ -204,7 +204,7 @@ pw_delta_rdd <- function(data, covariates, running_var, treatment, outcome,
 
   # fitted values of Y0 with prognosis weights
   # (estimated coefs from control group regression of Y0 on covariates)
-  Y0hat <- as.matrix(data[,covariates])%*%as.matrix(pweights, nrow = 2)
+  Y0hat <- as.matrix(data[,covariates])%*%as.matrix(pweights, nrow = length(pweights))
 
   # code values for rdrobust arguments
   if(!"y" %in% names(argg)) argg$y <- Y0hat
