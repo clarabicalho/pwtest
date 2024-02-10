@@ -39,7 +39,7 @@ pwtest <- function(data,
             !se_type %in% c("analytic", "bootstrap", "conventional", "bias-corrected", "robust"))) stop("`se_type` must take be set to either 'analytic', 'bootstrap', 'conventional', 'bias-corrected', 'robust'.")
 
   # restrict data to variables of interest
-  data <- data %>% dplyr::select(all_of(c(treatment, covariates, running_var, outcome)))
+  data <- data %>% dplyr::select(tidyselect::all_of(c(treatment, covariates, running_var, outcome)))
 
   # observed -------------------------------------
 
@@ -83,7 +83,7 @@ pwtest <- function(data,
 
   # standardize bootstrap population relative to control group SD
   data_stdc <- data %>%
-    mutate_at(.vars = c(outcome, covariates),
+    dplyr::mutate_at(.vars = c(outcome, covariates),
               .funs = function(x){
                 x_c <- x[data[[treatment]]==0]
                 sd_x <- sd(x_c, na.rm = TRUE)*(sum(!is.na(x_c))-1)/sum(!is.na(x_c))
