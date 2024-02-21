@@ -139,7 +139,7 @@ pwtest <- function(data,
         }
       )
 
-      return(c(pwdelta_sim))
+      return(c(uwdelta_sim, pwdelta_sim))
     } else {
       # cutoff takes default value as in rdrobust() if not specified by user
       cutoff <- ifelse("c" %in% names(argg), argg$c, 0)
