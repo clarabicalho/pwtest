@@ -190,6 +190,7 @@ pw_delta_rdd <- function(data, covariates, running_var, treatment, outcome,
 
   # standardize data relative to entire study group (the finite population)
   # uses same standardization procedure for data as in non-RD case
+  # REVIEW: does not standardize running variable
   if(standardize){
     if(simulation & length(unique(data[[outcome]]))==1L){
       data <- data %>%
