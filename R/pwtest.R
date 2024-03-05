@@ -60,7 +60,7 @@ pwtest <- function(data,
     argg$standardize <- TRUE
     argg_def <- formals()
     missing_args <- names(argg_def)[!names(argg_def) %in% names(argg)]
-    for (missing in missing_args) {
+    for(missing in setdiff(missing_args, "...")) {
       argg[[missing]] <- argg_def[[missing]]
     }
     pwdelta_obs <- do.call("pw_delta_rdd", args = argg)
@@ -148,7 +148,7 @@ pwtest <- function(data,
       dat_pw[bs_t, running_var] <- -(dat_pw[bs_t, running_var] - cutoff)
       arggn <- argg
       arggn$data <- dat_pw
-      arggn$standardize <- TRUE # REVIEW: already standardized 
+      arggn$standardize <- TRUE # REVIEW: already standardized
       arggn$simulation <- FALSE
       # relative to control group
 
@@ -158,8 +158,8 @@ pwtest <- function(data,
           do.call("pw_delta_rdd", args = arggn)
         },
         error = function(e) {
-          out <- rep(NA, 6)
-          names(out) <- c("dii", "uwdelta", "uwdelta_se", 
+          out <- rep(NA, 10)
+          names(out) <- c("dii", "uwdelta", "uwdelta_se",
           "uwdelta_p", "pw", "pwdelta", "pwdelta_se",
           "pwdelta_p", "rdrobust_output", "prog_Rsq")
           return(out)
@@ -189,8 +189,8 @@ pwtest <- function(data,
   # bootstrap sample checks ----------------------------------
 
   effective_sample <- min(
-    sum(!is.na(sapply(delta_sim, function(e) e$uwdelta))),
-    sum(!is.na(sapply(delta_sim, function(e) e$pwdelta)))
+    sum(!is.na(sapply(delta_sim, function(e) e[["uwdelta"]]))),
+    sum(!is.na(sapply(delta_sim, function(e) e[["pwdelta"]])))
   )
 
   if (!identical(effective_sample, as.integer(nsims)) & !oversample) {
@@ -287,7 +287,7 @@ pwtest <- function(data,
       #   lapply(delta_sim, function(i) i[!names(i) %in% "rdrobust_output"])
       # ), split(values, ind))
 
-      na_check <- sapply(delta_sim, function(e) !is.na(e$uwdelta) & !is.na(e$pwdelta))
+      na_check <- sapply(delta_sim, function(e) !is.na(e[["uwdelta"]]) & !is.na(e[["pwdelta"]]))
       delta_sim <- delta_sim[na_check]
       effective_sample <- sum(na_check)
     }
@@ -298,13 +298,13 @@ pwtest <- function(data,
   }
 
   # SEs as SD of sampling distribution
-  uwdelta_se2 <- sd(unlist(sapply(delta_sim, function(x) x$uwdelta)), na.rm = TRUE) * (nsims - 1) / nsims
+  uwdelta_se2 <- sd(unlist(sapply(delta_sim, function(x) x[["uwdelta"]])), na.rm = TRUE) * (nsims - 1) / nsims
 
   # p-value (from bootstrap distribution)
   #REVIEW: maybe standardization different between observed and bootstrap???? p-value is 1 for Bohlke
   if(!rdd | (rdd & se_type == "bootstrap")){
     pwdelta_se <- sd(unlist(sapply(delta_sim, function(x) x$pwdelta)), na.rm = TRUE) * (nsims - 1) / nsims
-    
+
     pw_delta_p <- sum(abs(unlist(sapply(delta_sim, function(x) x$pwdelta))) >= abs(pwdelta_obs$pwdelta), na.rm = TRUE) / effective_sample
 
   }
@@ -321,10 +321,10 @@ pwtest <- function(data,
     pw_delta_p <- 2 * pnorm(-abs(pw_delta_t))
   }
 
-  # R-squared from prognosis regression
-  prog_mod_f <- paste(c(outcome, paste(covariates, collapse = " + ")), collapse = " ~ ")
-  prog_mod <- lm(formula = prog_mod_f, data = data[data[[substitute(treatment)]] == 0, ])
-  prog_Rsq <- summary(prog_mod)$r.squared
+  # # R-squared from prognosis regression
+  # prog_mod_f <- paste(c(outcome, paste(covariates, collapse = " + ")), collapse = " ~ ")
+  # prog_mod <- lm(formula = prog_mod_f, data = data[data[[substitute(treatment)]] == 0, ])
+  # prog_Rsq <- summary(prog_mod)$r.squared
 
   # output ------------------------------------------------------------------
 
@@ -336,12 +336,13 @@ pwtest <- function(data,
         bootstrap = uwdelta_se2
       ),
       uwdelta_p =
-        sum(abs(unlist(sapply(delta_sim, function(x) x$uwdelta))) >= abs(uwdelta_obs$uwdelta)) / effective_sample,
+        sum(abs(unlist(sapply(delta_sim, function(x) x[["uwdelta"]]))) >= abs(uwdelta_obs$uwdelta)) / effective_sample,
       pwdelta_obs,
       pwdelta_se = unname(pwdelta_se),
       pwdelta_p =
-        sum(abs(unlist(sapply(delta_sim, function(x) x$pwdelta))) >= abs(pwdelta_obs$pwdelta), na.rm = TRUE) / effective_sample,
-      prog_Rsq = prog_Rsq
+        sum(abs(unlist(sapply(delta_sim, function(x) x[["pwdelta"]]))) >= abs(pwdelta_obs$pwdelta), na.rm = TRUE) / effective_sample,
+      prog_Rsq = pwdelta_obs$prog_Rsq,
+      bal_Rsq = pwdelta_obs$bal_Rsq
     )
   } else {
     # estimates <- se_type
@@ -350,13 +351,14 @@ pwtest <- function(data,
       uwdelta = pwdelta_obs$uwdelta,
       uwdelta_se = uwdelta_se2,
       uwdelta_p =
-        sum(abs(unlist(sapply(delta_sim, function(x) x$uwdelta)))>= abs(pwdelta_obs$uwdelta)) / effective_sample,
+        sum(abs(unlist(sapply(delta_sim, function(x) x[["uwdelta"]])))>= abs(pwdelta_obs$uwdelta)) / effective_sample,
       pw = pwdelta_obs$pw,
       pwdelta = pwdelta_obs$pwdelta,
       pwdelta_se = pwdelta_se,
       pwdelta_p = pw_delta_p,
       rdrobust_output = pwdelta_obs$rdrobust_output,
-      prog_Rsq = prog_Rsq
+      prog_Rsq = pwdelta_obs$prog_Rsq,
+      bal_Rsq = pwdelta_obs$bal_Rsq
     )
   }
 
