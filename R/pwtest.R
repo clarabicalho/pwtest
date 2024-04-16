@@ -57,12 +57,12 @@ pwtest <- function(data,
       simulation = simulation
     )
   } else {
+    # any arguments not supplied take `pw_delta_rdd` default values
     argg$standardize <- TRUE
     argg_def <- formals()
-    missing_args <- names(argg_def)[!names(argg_def) %in% names(argg)]
-    for(missing in setdiff(missing_args, "...")) {
-      argg[[missing]] <- argg_def[[missing]]
-    }
+    missing_args <- setdiff(names(argg_def)[!names(argg_def) %in% names(argg)], "...")
+    argg_add <- setNames(argg_def[missing_args], missing_args)
+    argg <- c(argg, argg_add)
     pwdelta_obs <- do.call("pw_delta_rdd", args = argg)
   }
 
@@ -158,13 +158,9 @@ pwtest <- function(data,
           do.call("pw_delta_rdd", args = arggn)
         },
         error = function(e) {
-          out <- rep(NA, 10)
-          names(out) <- c("dii", "uwdelta", "uwdelta_se",
-          "uwdelta_p", "pw", "pwdelta", "pwdelta_se",
-          "pwdelta_p", "rdrobust_output", "prog_Rsq")
+          out <- vector(mode = "list", length = length(pwdelta_obs))
+          names(out) <- names(pwdelta_obs)
           return(out)
-          # REVIEW  line below not printing with results
-          # message("Error with pw delta estimation of bootstrap sample.")
         }
       )
 
@@ -189,8 +185,8 @@ pwtest <- function(data,
   # bootstrap sample checks ----------------------------------
 
   effective_sample <- min(
-    sum(!is.na(sapply(delta_sim, function(e) e[["uwdelta"]]))),
-    sum(!is.na(sapply(delta_sim, function(e) e[["pwdelta"]])))
+    sum(!is.na(sapply(delta_sim, function(x) x[["uwdelta"]]))),
+    sum(!is.na(sapply(delta_sim, function(x) x[["pwdelta"]])))
   )
 
   if (!identical(effective_sample, as.integer(nsims)) & !oversample) {
@@ -202,7 +198,7 @@ pwtest <- function(data,
     # re-sample until effective is equal or greater to bootstrap sample size argument
     while (effective_sample < as.integer(nsims)) {
       samples <- replicate(
-        nsims,
+        nsims-effective_sample,
         c(
           sample(control_i, length(treat_i), replace = TRUE),
           sample(control_i, length(control_i), replace = TRUE)
@@ -336,7 +332,10 @@ pwtest <- function(data,
         bootstrap = uwdelta_se2
       ),
       uwdelta_p =
-        sum(abs(unlist(sapply(delta_sim, function(x) x[["uwdelta"]]))) >= abs(uwdelta_obs$uwdelta)) / effective_sample,
+        sum(abs(unlist(sapply(delta_sim, function(x) x[["uwdelta"]]))) >=
+              abs(uwdelta_obs$uwdelta)) / effective_sample,
+      # number of unique bootstrap samples (if different from nsims)
+      n_bootstrap = effective_sample,
       pwdelta_obs,
       pwdelta_se = unname(pwdelta_se),
       pwdelta_p =
@@ -345,17 +344,18 @@ pwtest <- function(data,
       bal_Rsq = pwdelta_obs$bal_Rsq
     )
   } else {
-    # estimates <- se_type
     estimates <- list(
       dii = pwdelta_obs$dii,
       uwdelta = pwdelta_obs$uwdelta,
       uwdelta_se = uwdelta_se2,
       uwdelta_p =
-        sum(abs(unlist(sapply(delta_sim, function(x) x[["uwdelta"]])))>= abs(pwdelta_obs$uwdelta)) / effective_sample,
+        sum(abs(unlist(sapply(delta_sim, function(x) x[["uwdelta"]])))>= abs(pwdelta_obs$uwdelta), na.rm = TRUE) / effective_sample,
       pw = pwdelta_obs$pw,
       pwdelta = pwdelta_obs$pwdelta,
       pwdelta_se = pwdelta_se,
       pwdelta_p = pw_delta_p,
+      # number of unique bootstrap samples (if different from nsims)
+      n_bootstrap = effective_sample,
       rdrobust_output = pwdelta_obs$rdrobust_output,
       prog_Rsq = pwdelta_obs$prog_Rsq,
       bal_Rsq = pwdelta_obs$bal_Rsq
