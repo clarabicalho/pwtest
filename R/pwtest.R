@@ -32,12 +32,12 @@ pwtest <- function(data,
   if (rdd & is.null(running_var)) stop("When using 'rdd = TRUE', need to specify 'running_var'.")
 
   if (!rdd & (length(se_type) != 1L |
-    !se_type %in% c("analytic", "bootstrap"))) {
+              !se_type %in% c("analytic", "bootstrap"))) {
     stop("`se_type` must take be set to either 'analytic' or 'bootstrap'.")
   }
 
   if (rdd & (length(se_type) != 1L |
-    !se_type %in% c("analytic", "bootstrap", "conventional", "bias-corrected", "robust"))) {
+             !se_type %in% c("analytic", "bootstrap", "conventional", "bias-corrected", "robust"))) {
     stop("`se_type` must take be set to either 'analytic', 'bootstrap', 'conventional', 'bias-corrected', 'robust'.")
   }
 
@@ -48,13 +48,13 @@ pwtest <- function(data,
 
   if (!rdd) {
     uwdelta_obs <- uw_delta(data, covariates, treatment, outcome,
-      standardize = TRUE,
-      simulation = simulation
+                            standardize = TRUE,
+                            simulation = simulation
     )
     pwdelta_obs <- pw_delta(data, covariates, treatment, outcome,
-      standardize = TRUE,
-      DIM = uwdelta_obs$dim,
-      simulation = simulation
+                            standardize = TRUE,
+                            DIM = uwdelta_obs$dim,
+                            simulation = simulation
     )
   } else {
     # any arguments not supplied take `pw_delta_rdd` default values
@@ -125,9 +125,9 @@ pwtest <- function(data,
       pwdelta_sim <- tryCatch(
         expr = {
           pw_delta(dat_pw, covariates, treatment, outcome,
-            standardize = TRUE,
-            DIM = uwdelta_sim$dim,
-            simulation = simulation
+                   standardize = TRUE,
+                   DIM = uwdelta_sim$dim,
+                   simulation = simulation
           )
         },
         error = function(e) {
@@ -164,20 +164,6 @@ pwtest <- function(data,
         }
       )
 
-      # # run simulated value of uw statistic using the same bandwidth set by user or returned by observed output using rdrobust()
-      # uwdelta_sim <- tryCatch(
-      #   expr = {
-      #     uwdelta_i <- do.call("uw_delta_rdd", args = argg)
-      #   },
-      #   error = function(e) {
-      #     out <- rep(NA, length(uwdelta_i))
-      #     names(out) <- names(uwdelta_i)
-      #     return(out)
-      #     # REVIEW  line below not printing with results
-      #     # message("Error with pw delta estimation of bootstrap sample.")
-      #   }
-      # )
-
       return(c(pwdelta_sim))
     }
   })
@@ -194,7 +180,7 @@ pwtest <- function(data,
   }
 
   if (oversample &
-    (!identical(effective_sample, as.integer(nsims)))) {
+      (!identical(effective_sample, as.integer(nsims)))) {
     # re-sample until effective is equal or greater to bootstrap sample size argument
     while (effective_sample < as.integer(nsims)) {
       samples <- replicate(
@@ -233,9 +219,9 @@ pwtest <- function(data,
           pwdelta_sim <- tryCatch(
             expr = {
               pw_delta(dat_pw, covariates, treatment, outcome,
-                standardize = TRUE,
-                DIM = uwdelta_sim$dim,
-                simulation = simulation
+                       standardize = TRUE,
+                       DIM = uwdelta_sim$dim,
+                       simulation = simulation
               )
             },
             error = function(e) {
@@ -259,8 +245,8 @@ pwtest <- function(data,
           pwdelta_sim <- tryCatch(
             expr = {
               pw_delta_rdd(dat_pw, covariates, running_var, treatment, outcome,
-                rd_estimator,
-                standardize = TRUE, simulation = simulation
+                           rd_estimator,
+                           standardize = TRUE, simulation = simulation
               )
             },
             error = function(e) {
@@ -276,13 +262,6 @@ pwtest <- function(data,
       })
 
       delta_sim <- c(delta_sim, delta_sim_add)
-
-      # #combine list elements into one
-      # rdouts <- which(unlist(lapply(delta_sim, names)) == "rdrobust_output")
-      # delta_all <- with(stack(
-      #   lapply(delta_sim, function(i) i[!names(i) %in% "rdrobust_output"])
-      # ), split(values, ind))
-
       na_check <- sapply(delta_sim, function(e) !is.na(e[["uwdelta"]]) & !is.na(e[["pwdelta"]]))
       delta_sim <- delta_sim[na_check]
       effective_sample <- sum(na_check)
@@ -307,20 +286,15 @@ pwtest <- function(data,
 
   if (rdd & se_type %in% c("analytic", "conventional", "bias-corrected", "robust")) {
     pwdelta_se <- switch(se_type,
-      analytic = pwdelta_obs$rdrobust_output$se["Conventional", ],
-      conventional = pwdelta_obs$rdrobust_output$se["Conventional", ],
-      `bias-corrected` = pwdelta_obs$rdrobust_output$se["Bias-Corrected", ],
-      robust = pwdelta_obs$rdrobust_output$se["Robust", ],
+                         analytic = pwdelta_obs$rdrobust_output$se["Conventional", ],
+                         conventional = pwdelta_obs$rdrobust_output$se["Conventional", ],
+                         `bias-corrected` = pwdelta_obs$rdrobust_output$se["Bias-Corrected", ],
+                         robust = pwdelta_obs$rdrobust_output$se["Robust", ],
     )
     # p-value (from analytic SE)
     pw_delta_t <- pwdelta_obs$pwdelta / pwdelta_se
     pw_delta_p <- 2 * pnorm(-abs(pw_delta_t))
   }
-
-  # # R-squared from prognosis regression
-  # prog_mod_f <- paste(c(outcome, paste(covariates, collapse = " + ")), collapse = " ~ ")
-  # prog_mod <- lm(formula = prog_mod_f, data = data[data[[substitute(treatment)]] == 0, ])
-  # prog_Rsq <- summary(prog_mod)$r.squared
 
   # output ------------------------------------------------------------------
 
@@ -328,8 +302,8 @@ pwtest <- function(data,
     estimates <- c(
       uwdelta_obs[-length(uwdelta_obs)],
       uwdelta_se = switch(se_type,
-        analytic = uwdelta_obs$uwdelta_se,
-        bootstrap = uwdelta_se2
+                          analytic = uwdelta_obs$uwdelta_se,
+                          bootstrap = uwdelta_se2
       ),
       uwdelta_p =
         sum(abs(unlist(sapply(delta_sim, function(x) x[["uwdelta"]]))) >=
