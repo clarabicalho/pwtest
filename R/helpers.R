@@ -180,10 +180,6 @@ pw_delta <- function(data, covariates, treatment, outcome, standardize = TRUE,
 #' @param rd_estimator character. Whether to use the conventional ("h") or the bias-corrected local-polynomial point estimator ("b"). See `rdrobust()` for more details. Defaults to conventional estimate ("h").
 #' @param ... arguments passed on to `rdrobust` function. If `rdrobust()` arguments `y` and `covs` are not specified, they will take the values of the variables defined by `outcome` and `covariates`, respectively. All other arguments, if not specified, will take the default values in `rdrobust()`
 
-# REVIEW:
-# Allowing argument "c" to be passed onto pwtest() (to be used in rdrobust()) is creating all sorts of eval problems because it overrides the concatenate function `c()`
-# Need to figure out if there is a workaround (presumably so because `c()` is used in `rdrobust`)
-
 pw_delta_rdd <- function(data, covariates, running_var, treatment, outcome,
                          standardize = TRUE, simulation = FALSE,
                          rd_estimator = "h", ...){
@@ -292,39 +288,3 @@ pw_delta_rdd <- function(data, covariates, running_var, treatment, outcome,
               bal_Rsq = bal_Rsq))
 
 }
-
-
-# uwdelta_rdd <- function(data, covariates, running_var, treatment, outcome,
-#                          standardize = TRUE, simulation = FALSE,
-#                          rd_estimator = "h", ...){
-
-#   argg <- as.list(match.call())
-#   c <- NULL
-
-#   if("c" %in% names(argg)){
-#     warning("Arguments `treatment` and `c` both specified, will use `treatment` var to define treatment condition, but `c` will be passed onto `rdrobust()`. Please ensure the values coded in `treatment` are consistent with value of `c`.")
-#   }
-
-  # # UW delta estimates using the optimal or user-set bandwidth
-  # if(!rd_estimator %in% names(argg)){
-  #   # Note: if not specified, the conventional or bias-corrected bandwidth passed onto covariate-by-covariate difference in intercepts is taken from the same data used to calculate the prognosis weighted delta
-  #   argg[[rd_estimator]] <- unname(rd_out$bws[rd_estimator,])
-  # }
-
-#   # Note: calculates the difference in intercepts for covariates using the same bandwidth set by user or defaulted in rdrobust() with the fitted Y0hat.
-#   # All other values are rdrobust defaults if not set by user.
-#   dii_covs <- sapply(covariates, function(covariate){
-#     argg_cov <- argg
-#     argg_cov$y <- data[[covariate]]
-#     argg_cov$x <- data[[running_var]]
-#     argg_new <- intersect(names(argg_cov), names(formals(rdrobust)))
-#     rd <- do.call("rdrobust", args = argg_cov[argg_new])
-#     if(rd_estimator == "h") uwd <- unname(rd$Estimate[,"tau.us"])
-#     if(rd_estimator == "b") uwd <- unname(rd$Estimate[,"tau.bc"])
-#     return(uwd)
-#   })
-
-#   return(list(dii = dii_covs,
-#               uwdelta = sum(dii_covs)))
-
-# }
