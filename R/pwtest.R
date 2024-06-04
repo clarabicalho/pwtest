@@ -42,7 +42,7 @@ pwtest <- function(data,
   }
 
   # restrict data to variables of interest
-  data <- data %>% dplyr::select(all_of(c(treatment, covariates, running_var, outcome)))
+  data <- data %>% dplyr::select(tidyselect::all_of(c(treatment, covariates, running_var, outcome)))
 
   # observed statistics-------------------------------------
 

@@ -22,29 +22,29 @@ stdr <- function(x){
 pw <- function(data, covariates, treatment, outcome, standardize, simulation){
 
   # listwise deletion of observations with missing values
-  data_pw <- data %>% drop_na(all_of(c(outcome, covariates, treatment)))
+  data_pw <- data %>% tidyr::drop_na(tidyselect::all_of(c(outcome, covariates, treatment)))
   z0 <- data_pw[[treatment]] == 0
 
   # standardize control data for prognosis regression
   if(standardize){
     if(simulation & length(unique(data[[outcome]]))==1L){
       # standardize -covariates only- in simulation runs with fixed POs
-      data_c <- data_pw %>% filter(z0) %>%
-        mutate_at(.vars = c(covariates),
+      data_c <- data_pw %>% dplyr::filter(z0) %>%
+        dplyr::mutate_at(.vars = c(covariates),
                   .funs = stdr) %>% as.data.frame()
     } else {
-      data_c <- data_pw %>% filter(z0) %>%
-        mutate_at(.vars = c(outcome, covariates),
+      data_c <- data_pw %>% dplyr::filter(z0) %>%
+        dplyr::mutate_at(.vars = c(outcome, covariates),
                   .funs = stdr) %>% as.data.frame()
     }
 
   } else {
-    data_c <- data_pw %>% filter(z0)
+    data_c <- data_pw %>% dplyr::filter(z0)
   }
 
   # check if variance = 0 and return error
   check_var <- data_c %>%
-    dplyr::select(all_of(c(covariates, outcome))) %>%
+    dplyr::select(tidyselect::all_of(c(covariates, outcome))) %>%
     apply(., 2, var, na.rm = TRUE)
   var_na <- names(check_var[is.na(check_var)])
   if(length(var_na)>=1L) stop(paste0("The following variables are constant in the control group among complete cases, so cannot be standardized: ",
@@ -73,18 +73,18 @@ pw <- function(data, covariates, treatment, outcome, standardize, simulation){
 uw_delta <- function(data, covariates, treatment, outcome, standardize = TRUE, simulation = FALSE){
 
   # drop if missing treatment value
-  data_uw <- data %>% drop_na(all_of(c(treatment)))
+  data_uw <- data %>% tidyr::drop_na(tidyselect::all_of(c(treatment)))
   z0 <- data_uw[[treatment]] == 0
 
   # standardize data relative to entire study group (the finite population)
   if(standardize){
     if(simulation & length(unique(data[[outcome]]))==1L){
       data_uw <- data_uw %>%
-        mutate_at(.vars = c(covariates),
+        dplyr::mutate_at(.vars = c(covariates),
                   .funs = stdr) %>% as.data.frame()
     } else {
       data_uw <- data_uw %>%
-        mutate_at(.vars = c(outcome, covariates),
+        dplyr::mutate_at(.vars = c(outcome, covariates),
                   .funs = stdr) %>% as.data.frame()
     }
   }
@@ -207,11 +207,11 @@ pw_delta_rdd <- function(data, covariates, running_var, treatment, outcome,
   if(standardize){
     if(simulation & length(unique(data[[outcome]]))==1L){
       data <- data %>%
-        mutate_at(.vars = c(covariates),
+        dplyr::mutate_at(.vars = c(covariates),
                   .funs = stdr) %>% as.data.frame()
     } else {
       data <- data %>%
-        mutate_at(.vars = c(outcome, covariates),
+        dplyr::mutate_at(.vars = c(outcome, covariates),
                   .funs = stdr) %>% as.data.frame()
     }
   }
