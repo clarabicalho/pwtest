@@ -47,7 +47,7 @@ pw <- function(data, covariates, treatment, outcome, standardize, simulation){
     dplyr::select(tidyselect::all_of(c(covariates, outcome))) %>%
     apply(., 2, var, na.rm = TRUE)
   var_na <- names(check_var[is.na(check_var)])
-  if(length(var_na)>=1L) stop(paste0("The following variables are constant in the control group, so cannot be standardized: ",
+  if(length(var_na)>=1L) stop(paste0("The following variables are constant in the control group among complete cases, so cannot be standardized: ",
                                      paste0(var_na, collapse = ", "),
                                      ". Consider an alternative, for example, excluding the covariate(s)."))
   # calculate prognosis weights
@@ -151,9 +151,21 @@ pw_delta <- function(data, covariates, treatment, outcome, standardize = TRUE,
   # prognosis weighted delta
   pwdelta <- sum(pweights*DIM, na.rm = TRUE)
 
+  # R-squared from prognosis regression
+  prog_mod_f <- paste(c(outcome, paste(covariates, collapse = " + ")), collapse = " ~ ")
+  prog_mod <- lm(formula = prog_mod_f, data = data[data[[treatment]] == 0, ])
+  prog_Rsq <- summary(prog_mod)$r.squared
+
+  # R-squared from balance regression
+  bal_mod_f <- paste(c(treatment, paste(covariates, collapse = " + ")), collapse = " ~ ")
+  bal_mod <- lm(formula = bal_mod_f, data = data)
+  bal_Rsq <- summary(bal_mod)$r.squared
+
   return(list(pw = pweights,
               pwdelta_j = pwdelta_j,
-              pwdelta = pwdelta))
+              pwdelta = pwdelta,
+              prog_Rsq = prog_Rsq,
+              bal_Rsq = bal_Rsq))
 
 }
 
@@ -168,10 +180,6 @@ pw_delta <- function(data, covariates, treatment, outcome, standardize = TRUE,
 #' @param rd_estimator character. Whether to use the conventional ("h") or the bias-corrected local-polynomial point estimator ("b"). See `rdrobust()` for more details. Defaults to conventional estimate ("h").
 #' @param ... arguments passed on to `rdrobust` function. If `rdrobust()` arguments `y` and `covs` are not specified, they will take the values of the variables defined by `outcome` and `covariates`, respectively. All other arguments, if not specified, will take the default values in `rdrobust()`
 
-# REVIEW:
-# Allowing argument "c" to be passed onto pwtest() (to be used in rdrobust()) is creating all sorts of eval problems because it overrides the concatenate function `c()`
-# Need to figure out if there is a workaround (presumably so because `c()` is used in `rdrobust`)
-
 pw_delta_rdd <- function(data, covariates, running_var, treatment, outcome,
                          standardize = TRUE, simulation = FALSE,
                          rd_estimator = "h", ...){
@@ -185,11 +193,13 @@ pw_delta_rdd <- function(data, covariates, running_var, treatment, outcome,
 
   # obtain prognostic weights/coefficients for each covariate calculated for
   # all control units in the full data
-  pweights <- pw(data = data, covariates = covariates, treatment = treatment,
+  pw_full <- pw(data = data, covariates = covariates, treatment = treatment,
                  outcome = outcome, standardize = standardize, simulation = simulation)
 
+  # if(any(is.na(pw_full))) stop()
   # standardize data relative to entire study group (the finite population)
   # uses same standardization procedure for data as in non-RD case
+  # REVIEW: does not standardize running variable
   if(standardize){
     if(simulation & length(unique(data[[outcome]]))==1L){
       data <- data %>%
@@ -204,7 +214,7 @@ pw_delta_rdd <- function(data, covariates, running_var, treatment, outcome,
 
   # fitted values of Y0 with prognosis weights
   # (estimated coefs from control group regression of Y0 on covariates)
-  Y0hat <- as.matrix(data[,covariates])%*%as.matrix(pweights, nrow = 2)
+  Y0hat <- as.matrix(data[,covariates])%*%as.matrix(pw_full, nrow = length(pw_full))
 
   # code values for rdrobust arguments
   if(!"y" %in% names(argg)) argg$y <- Y0hat
@@ -216,9 +226,25 @@ pw_delta_rdd <- function(data, covariates, running_var, treatment, outcome,
   # unless `covs` is specified (separately)
   rd_out <- do.call("rdrobust", args = argg[rd_argg])
 
-  # we use the rdrobust output to extract bandwidth, cutoff points,
-  # polynomial specifications, etc and the default of these arguments
-  # when appropriate
+  # use the rdrobust output to extract bandwidth and
+  # recalculate weights within the bandwidth
+  # w/in bw: (re)estimate weights, (re)estimate Y0hat, estimate dii
+  argg$h <- rd_out$bws[1,1] # optimal bandwidth
+  cutoff <- ifelse("c" %in% names(argg), argg$c, 0)
+
+  data_bw <- subset(data, data[[running_var]] >= cutoff - argg$h & data[[running_var]] <= cutoff + argg$h)
+
+  pw_bw <- pw(data = data_bw, covariates = covariates, treatment = treatment,
+                 outcome = outcome, standardize = standardize, simulation = simulation)
+
+  # fitted values of Y0 with prognosis weights within the bandwidth
+  # (estimated coefs from control group regression of Y0 on covariates)
+  Y0hat <- as.matrix(data[,covariates])%*%as.matrix(pw_bw, nrow = length(pw_bw))
+  argg$y <- Y0hat # overwrite outcome with within-bw prognostic weights
+  rd_argg <- intersect(names(argg), names(formals(rdrobust)))
+
+  # run dii estimation on reweighted (within-bandwidth) fitted Y0hat
+  rd_out <- do.call("rdrobust", args = argg[rd_argg])
 
   # pw delta as difference in intercepts for Y0hat
   if(rd_estimator == "h") pwdelta <- unname(rd_out$Estimate[,"tau.us"])
@@ -242,11 +268,23 @@ pw_delta_rdd <- function(data, covariates, running_var, treatment, outcome,
     return(uwd)
   })
 
+  # R-squared from prognosis regression
+  prog_mod_f <- paste(c(outcome, paste(covariates, collapse = " + ")), collapse = " ~ ")
+  prog_mod <- lm(formula = prog_mod_f, data = data_bw[data_bw[[substitute(treatment)]] == 0, ])
+  prog_Rsq <- summary(prog_mod)$r.squared
+
+  # R-squared from balance regression
+  bal_mod_f <- paste(c(treatment, paste(covariates, collapse = " + ")), collapse = " ~ ")
+  bal_mod <- lm(formula = bal_mod_f, data = data_bw)
+  bal_Rsq <- summary(bal_mod)$r.squared
+
   return(list(dii = dii_covs,
               uwdelta = sum(dii_covs),
-              pw = pweights,
+              pw = pw_bw,
               pwdelta = pwdelta,
               pwdelta_se = rd_out$se,
-              rdrobust_output = rd_out))
+              rdrobust_output = rd_out,
+              prog_Rsq = prog_Rsq,
+              bal_Rsq = bal_Rsq))
 
 }
