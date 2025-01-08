@@ -16,6 +16,9 @@ pwtest(
   simulation = FALSE,
   rdd = FALSE,
   rd_estimator = "h",
+  equivalence = FALSE,
+  equiv_lower = NULL,
+  equiv_upper = NULL,
   ...
 )
 }
@@ -41,6 +44,12 @@ pwtest(
 \item{rdd}{logical value. Whether test statistics are calculated using continuous RDD approach.}
 
 \item{rd_estimator}{character. Whether to use the conventional ("h") or the bias-corrected local-polynomial point estimator ("b"). See \code{rdrobust()} for more details. Defaults to conventional estimate ("h").}
+
+\item{equivalence}{logical value. If TRUE, carry out equivalence test as described in Hartman and Hidalgo (2018). For a full description of the bootstrapping procedure, see paper.}
+
+\item{equiv_lower}{numerical value. If \code{equivalence = TRUE}, lower bound of the equivalence range as a multiplier for the standard deviation of potential outcomes under control.}
+
+\item{equiv_upper}{numerical value. If \code{equivalence = TRUE}, upper bound of the equivalence range as a multiplier for the standard deviation of potential outcomes under control.}
 
 \item{...}{arguments passed onto \code{rdrobust()} function}
 }

@@ -10,6 +10,9 @@
 #' @param simulation logical value.
 #' @param rdd logical value. Whether test statistics are calculated using continuous RDD approach.
 #' @param rd_estimator character. Whether to use the conventional ("h") or the bias-corrected local-polynomial point estimator ("b"). See `rdrobust()` for more details. Defaults to conventional estimate ("h").
+#' @param equivalence logical value. If TRUE, carry out equivalence test as described in Hartman and Hidalgo (2018). For a full description of the bootstrapping procedure, see paper.
+#' @param equiv_lower numerical value. If `equivalence = TRUE`, lower bound of the equivalence range as a multiplier for the standard deviation of potential outcomes under control.
+#' @param equiv_upper numerical value. If `equivalence = TRUE`, upper bound of the equivalence range as a multiplier for the standard deviation of potential outcomes under control.
 #' @param ... arguments passed onto `rdrobust()` function
 #' @import rdrobust
 #' @importFrom stats pnorm
@@ -22,7 +25,11 @@ pwtest <- function(data,
                    nsims = 500, oversample = FALSE,
                    se_type = "analytic",
                    simulation = FALSE, rdd = FALSE,
-                   rd_estimator = "h", ...) {
+                   rd_estimator = "h",
+                   equivalence = FALSE,
+                   equiv_lower = NULL,
+                   equiv_upper = NULL,
+                   ...) {
   require(rdrobust)
   argg <- as.list(match.call())
   c <- NULL
@@ -41,8 +48,15 @@ pwtest <- function(data,
     stop("`se_type` must take be set to either 'analytic', 'bootstrap', 'conventional', 'bias-corrected', 'robust'.")
   }
 
+  if(rdd & equivalence) stop("The equivalence test feature is not yet compatible with RDD designs.")
+
   # restrict data to variables of interest
   data <- data %>% dplyr::select(tidyselect::all_of(c(treatment, covariates, running_var, outcome)))
+
+  # set default lower and upper bounds if null
+  # reference value .36*SD of potential outcomes under treatment (see Hartman and Hidalgo 2018)
+  if(equivalence & is.null(equiv_lower)) equiv_lower <- .36;
+  if(equivalence & is.null(equiv_upper)) equiv_upper <- .36;
 
   # observed statistics-------------------------------------
 
@@ -79,25 +93,15 @@ pwtest <- function(data,
   # resample from control group with replacement
   treat_i <- which(data[[treatment]] == 1)
   control_i <- which(data[[treatment]] == 0)
-  samples <- replicate(
-    nsims,
-    c(
-      sample(control_i, length(treat_i), replace = TRUE),
-      sample(control_i, length(control_i), replace = TRUE)
-    )
-  )
+  samples <- get_bootstrap_samples(control_i, length(treat_i), nsims)
+
+  if(equivalence){
+    samples2 <- get_bootstrap_samples(control_i, length(treat_i), nsims)
+  }
 
   # standardize bootstrap population relative to control group SD
-  data_stdc <- data %>%
-    mutate_at(
-      .vars = c(outcome, covariates),
-      .funs = function(x) {
-        x_c <- x[data[[treatment]] == 0]
-        sd_x <- sd(x_c, na.rm = TRUE) * (sum(!is.na(x_c)) - 1) / sum(!is.na(x_c))
-        return((x - mean(x_c, na.rm = TRUE)) / sd_x)
-      }
-    ) %>%
-    as.data.frame()
+  data_stdc <- std_data(data, c(outcome, covariates), treatment)
+
 
   # obtain delta distribution from bootstrap samples
   delta_sim <- apply(samples, 2, function(z) {
@@ -109,53 +113,26 @@ pwtest <- function(data,
     # change treatment condition from control to treatment for bootstrap treatment group
     dat_pw[[treatment]][1:length(treat_i)] <- 1
 
+    # permutation under equivalence test (first one-sided test using lower bound)
+    if(equivalence){
+      dat_uw[[outcome]][1:length(treat_i)] <- dat_uw[[outcome]] - equiv_lower
+    }
+
     if (!rdd) {
-      uwdelta_sim <- tryCatch(
-        expr = {
-          uw_delta(dat_uw, covariates, treatment, outcome, standardize = FALSE)
-        },
-        error = function(e) {
-          out <- vector(mode = "list", length = length(uwdelta_obs))
-          names(out) <- names(uwdelta_obs)
-          return(out)
-          message("Error with UW delta estimation of bootstrap sample.")
-        }
-      )
-
-      pwdelta_sim <- tryCatch(
-        expr = {
-          pw_delta(dat_pw, covariates, treatment, outcome,
-                   standardize = TRUE,
-                   DIM = uwdelta_sim$dim,
-                   simulation = simulation
-          )
-        },
-        error = function(e) {
-          out <- vector(mode = "list", length = length(pwdelta_obs))
-          names(out) <- names(pwdelta_obs)
-          return(out)
-          # REVIEW line below not printing with results
-          message("Error with pw delta estimation of bootstrap sample.")
-        }
-      )
-
+      uwdelta_sim <- safe_delta(uw_delta, dat_uw, uwdelta_obs, covariates, treatment, outcome, standardize = FALSE)
+      pwdelta_sim <- safe_delta(pw_delta, dat_pw, pwdelta_obs, covariates, treatment, outcome, standardize = TRUE, DIM = uwdelta_sim$dim, simulation = simulation)
       return(c(uwdelta_sim, pwdelta_sim))
     } else {
+      bs_t <- dat_pw[[treatment]] == 1
+      # invert the running variable for the bootstrap sample of treatment observations
+      dat_pw[bs_t, running_var] <- -(dat_pw[bs_t, running_var])
       # cutoff takes default value as in rdrobust() if not specified by user
       cutoff <- ifelse("c" %in% names(argg), argg$c, 0)
-      # invert the running variable for the bootstrap sample of treatment observations
-      bs_t <- dat_pw[[treatment]] == 1
-      dat_pw[bs_t, running_var] <- -(dat_pw[bs_t, running_var] - cutoff)
-      arggn <- argg
-      arggn$data <- dat_pw
-      arggn$standardize <- TRUE # REVIEW: already standardized
-      arggn$simulation <- FALSE
-      # relative to control group
-
-      # run simulated value of pw statistic
       pwdelta_sim <- tryCatch(
         expr = {
-          do.call("pw_delta_rdd", args = arggn)
+          do.call("pw_delta_rdd", args = modifyList(argg, list(data = dat_pw,
+                                                               standardize = TRUE,
+                                                               simulation = FALSE)))
         },
         error = function(e) {
           out <- vector(mode = "list", length = length(pwdelta_obs))
@@ -168,12 +145,44 @@ pwtest <- function(data,
     }
   })
 
+  # repeat procedure for second sample (only applies in equivalence test)
+  if(equivalence){
+
+  delta_sim2 <- apply(samples2, 2, function(z) {
+    dat_uw <- data_stdc[z, ]
+    # change treatment condition from control to treatment for bootstrap treatment group
+    dat_uw[[treatment]][1:length(treat_i)] <- 1
+
+    dat_pw <- data[z, ]
+    # change treatment condition from control to treatment for bootstrap treatment group
+    dat_pw[[treatment]][1:length(treat_i)] <- 1
+
+    # permutation under equivalence test (second one-sided test using upper bound)
+    dat_uw[[outcome]][1:length(treat_i)] <- dat_uw[[outcome]] - equiv_upper
+
+    uwdelta_sim <- safe_delta(uw_delta, dat_uw, uwdelta_obs, covariates, treatment, outcome, standardize = FALSE)
+    pwdelta_sim <- safe_delta(pw_delta, dat_pw, pwdelta_obs, covariates, treatment, outcome, standardize = TRUE, DIM = uwdelta_sim$dim, simulation = simulation)
+    return(c(uwdelta_sim, pwdelta_sim))
+
+  })
+
+  }
+
   # bootstrap sample checks ----------------------------------
 
   effective_sample <- min(
     sum(!is.na(sapply(delta_sim, function(x) x[["uwdelta"]]))),
     sum(!is.na(sapply(delta_sim, function(x) x[["pwdelta"]])))
   )
+
+  # REVIEW implement resampling in cases
+  # when effective sample of second distribution < nsims and oversample == TRUE
+  if(equivalence){
+    effective_sample2 <- min(
+      sum(!is.na(sapply(delta_sim2, function(x) x[["pwdelta"]]))),
+      sum(!is.na(sapply(delta_sim2, function(x) x[["pwdelta"]])))
+    )
+  }
 
   if (!identical(effective_sample, as.integer(nsims)) & !oversample) {
     warning(paste0("Effective bootstrap sample to calculate delta p-values is of size ", effective_sample, ". Consider changing argument `oversample` to `TRUE`"))
@@ -183,17 +192,12 @@ pwtest <- function(data,
       (!identical(effective_sample, as.integer(nsims)))) {
     # re-sample until effective is equal or greater to bootstrap sample size argument
     while (effective_sample < as.integer(nsims)) {
-      samples <- replicate(
-        nsims-effective_sample,
-        c(
-          sample(control_i, length(treat_i), replace = TRUE),
-          sample(control_i, length(control_i), replace = TRUE)
-        )
-      )
+      samples <- get_bootstrap_samples(control_i, length(treat_i), nsims-effective_sample)
 
       # restrict bootstrap sample to complete observations
 
       # obtain delta distribution based on resamples
+      # REVIEW: not considering equivalence test
       delta_sim_add <- apply(samples, 2, function(z) {
         dat_uw <- data_stdc[z, ]
         # change treatment condition from control to treatment for sample
@@ -204,35 +208,8 @@ pwtest <- function(data,
         dat_pw[[treatment]][1:length(treat_i)] <- 1
 
         if (!rdd) {
-          uwdelta_sim <- tryCatch(
-            expr = {
-              uw_delta(dat_uw, covariates, treatment, outcome, standardize = FALSE)
-            },
-            error = function(e) {
-              out <- vector(mode = "list", length = length(uwdelta_obs))
-              names(out) <- names(uwdelta_obs)
-              return(out)
-              message("Error with UW delta estimation of bootstrap sample.")
-            }
-          )
-
-          pwdelta_sim <- tryCatch(
-            expr = {
-              pw_delta(dat_pw, covariates, treatment, outcome,
-                       standardize = TRUE,
-                       DIM = uwdelta_sim$dim,
-                       simulation = simulation
-              )
-            },
-            error = function(e) {
-              out <- vector(mode = "list", length = length(pwdelta_obs))
-              names(out) <- names(pwdelta_obs)
-              return(out)
-              # REVIEW below not printing with results
-              message("Error with pw delta estimation of bootstrap sample.")
-            }
-          )
-
+          uwdelta_sim <- safe_delta(uw_delta, dat_uw, uwdelta_obs, covariates, treatment, outcome, standardize = FALSE)
+          pwdelta_sim <- safe_delta(pw_delta, dat_pw, pwdelta_obs, covariates, treatment, outcome, standardize = TRUE, DIM = uwdelta_sim$dim, simulation = simulation)
           return(c(uwdelta_sim, pwdelta_sim))
         } else {
           # RD DESIGN ############
@@ -253,8 +230,6 @@ pwtest <- function(data,
               out <- rep(NA, length(pwdelta_obs))
               names(out) <- names(pwdelta_obs)
               return(out)
-              # REVIEW line below not printing with results
-              # message("Error with pw delta estimation of bootstrap sample.")
             }
           )
           return(pwdelta_sim)
@@ -279,7 +254,6 @@ pwtest <- function(data,
   #REVIEW: maybe standardization different between observed and bootstrap???? p-value is 1 for Bohlke
   if(!rdd | (rdd & se_type == "bootstrap")){
     pwdelta_se <- sd(unlist(sapply(delta_sim, function(x) x$pwdelta)), na.rm = TRUE) * (nsims - 1) / nsims
-
     pw_delta_p <- sum(abs(unlist(sapply(delta_sim, function(x) x$pwdelta))) >= abs(pwdelta_obs$pwdelta), na.rm = TRUE) / effective_sample
 
   }
@@ -299,24 +273,48 @@ pwtest <- function(data,
   # output ------------------------------------------------------------------
 
   if (!rdd) {
-    estimates <- c(
-      uwdelta_obs[-length(uwdelta_obs)],
-      uwdelta_se = switch(se_type,
-                          analytic = uwdelta_obs$uwdelta_se,
-                          bootstrap = uwdelta_se2
-      ),
-      uwdelta_p =
-        sum(abs(unlist(sapply(delta_sim, function(x) x[["uwdelta"]]))) >=
-              abs(uwdelta_obs$uwdelta)) / effective_sample,
-      # number of unique bootstrap samples (if different from nsims)
-      n_bootstrap = effective_sample,
-      pwdelta_obs,
-      pwdelta_se = unname(pwdelta_se),
-      pwdelta_p =
-        sum(abs(unlist(sapply(delta_sim, function(x) x[["pwdelta"]]))) >= abs(pwdelta_obs$pwdelta), na.rm = TRUE) / effective_sample,
-      prog_Rsq = pwdelta_obs$prog_Rsq,
-      bal_Rsq = pwdelta_obs$bal_Rsq
-    )
+    if(!equivalence){
+      estimates <- c(
+        uwdelta_obs[-length(uwdelta_obs)],
+        uwdelta_se = switch(se_type,
+                            analytic = uwdelta_obs$uwdelta_se,
+                            bootstrap = uwdelta_se2
+        ),
+        uwdelta_p =
+          sum(abs(unlist(sapply(delta_sim, function(x) x[["uwdelta"]]))) >=
+                abs(uwdelta_obs$uwdelta)) / effective_sample,
+        # number of unique bootstrap samples (if different from nsims)
+        n_bootstrap = effective_sample,
+        pwdelta_obs,
+        pwdelta_se = unname(pwdelta_se),
+        pwdelta_p =
+          sum(abs(unlist(sapply(delta_sim, function(x) x[["pwdelta"]]))) >= abs(pwdelta_obs$pwdelta), na.rm = TRUE) / effective_sample,
+        prog_Rsq = pwdelta_obs$prog_Rsq,
+        bal_Rsq = pwdelta_obs$bal_Rsq
+      )
+    }else{
+      estimates <- c(
+        uwdelta_obs[-length(uwdelta_obs)],
+        uwdelta_se = switch(se_type,
+                            analytic = uwdelta_obs$uwdelta_se,
+                            bootstrap = uwdelta_se2),
+        uwdelta_pl = get_pvalue_uw(delta_sim,  uwdelta_obs$uwdelta, effective_sample),
+        uwdelta_pu = get_pvalue_uw(delta_sim2, uwdelta_obs$uwdelta, effective_sample2),
+        # number of unique bootstrap samples (if different from nsims)
+        n_bootstrap_l = effective_sample,
+        n_bootstrap_u = effective_sample2,
+        pwdelta_obs,
+        pwdelta_se = unname(pwdelta_se),
+        pwdelta_pl = get_pvalue_pw(delta_sim, pwdelta_obs$pwdelta, effective_sample),
+        pwdelta_pu = get_pvalue_pw(delta_sim2, pwdelta_obs$pwdelta, effective_sample2),
+        prog_Rsq = pwdelta_obs$prog_Rsq,
+        bal_Rsq = pwdelta_obs$bal_Rsq
+      )
+
+      estimates <- c(estimates,
+                     uwdelta_equivtest = ifelse(estimates[["uwdelta_pl"]] < .05 & estimates[["uwdelta_pu"]] < .05, "Reject", "Fail to reject"),
+                     pwdelta_equivtest = ifelse(estimates[["pwdelta_pl"]] < .05 & estimates[["pwdelta_pu"]] < .05, "Reject", "Fail to reject"))
+    }
   } else {
     estimates <- list(
       dii = pwdelta_obs$dii,
