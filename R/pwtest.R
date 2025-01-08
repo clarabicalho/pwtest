@@ -115,7 +115,7 @@ pwtest <- function(data,
 
     # permutation under equivalence test (first one-sided test using lower bound)
     if(equivalence){
-      dat_uw[[outcome]][1:length(treat_i)] <- dat_uw[[outcome]] - equiv_lower
+      dat_uw[[outcome]][1:length(treat_i)] <- dat_uw[[outcome]][1:length(treat_i)] - equiv_lower
     }
 
     if (!rdd) {
@@ -158,7 +158,7 @@ pwtest <- function(data,
     dat_pw[[treatment]][1:length(treat_i)] <- 1
 
     # permutation under equivalence test (second one-sided test using upper bound)
-    dat_uw[[outcome]][1:length(treat_i)] <- dat_uw[[outcome]] + equiv_upper
+    dat_uw[[outcome]][1:length(treat_i)] <- dat_uw[[outcome]][1:length(treat_i)] + equiv_upper
 
     uwdelta_sim <- safe_delta(uw_delta, dat_uw, uwdelta_obs, covariates, treatment, outcome, standardize = FALSE)
     pwdelta_sim <- safe_delta(pw_delta, dat_pw, pwdelta_obs, covariates, treatment, outcome, standardize = TRUE, DIM = uwdelta_sim$dim, simulation = simulation)
@@ -280,15 +280,12 @@ pwtest <- function(data,
                             analytic = uwdelta_obs$uwdelta_se,
                             bootstrap = uwdelta_se2
         ),
-        uwdelta_p =
-          sum(abs(unlist(sapply(delta_sim, function(x) x[["uwdelta"]]))) >=
-                abs(uwdelta_obs$uwdelta)) / effective_sample,
+        uwdelta_p = get_pvalue_uw(delta_sim,  uwdelta_obs$uwdelta, effective_sample),
         # number of unique bootstrap samples (if different from nsims)
         n_bootstrap = effective_sample,
         pwdelta_obs,
         pwdelta_se = unname(pwdelta_se),
-        pwdelta_p =
-          sum(abs(unlist(sapply(delta_sim, function(x) x[["pwdelta"]]))) >= abs(pwdelta_obs$pwdelta), na.rm = TRUE) / effective_sample,
+        pwdelta_p = get_pvalue_pw(delta_sim, pwdelta_obs$pwdelta, effective_sample),
         prog_Rsq = pwdelta_obs$prog_Rsq,
         bal_Rsq = pwdelta_obs$bal_Rsq
       )
@@ -298,15 +295,15 @@ pwtest <- function(data,
         uwdelta_se = switch(se_type,
                             analytic = uwdelta_obs$uwdelta_se,
                             bootstrap = uwdelta_se2),
-        uwdelta_pl = get_pvalue_uw(delta_sim,  uwdelta_obs$uwdelta, effective_sample),
-        uwdelta_pu = get_pvalue_uw(delta_sim2, uwdelta_obs$uwdelta, effective_sample2),
+        uwdelta_pl = sum(unlist(sapply(delta_sim, function(x) x[["uwdelta"]])) <= uwdelta_obs$uwdelta) / effective_sample,
+        uwdelta_pu = sum(unlist(sapply(delta_sim2, function(x) x[["uwdelta"]])) >= uwdelta_obs$uwdelta) / effective_sample2,
         # number of unique bootstrap samples (if different from nsims)
         n_bootstrap_l = effective_sample,
         n_bootstrap_u = effective_sample2,
         pwdelta_obs,
         pwdelta_se = unname(pwdelta_se),
-        pwdelta_pl = get_pvalue_pw(delta_sim, pwdelta_obs$pwdelta, effective_sample),
-        pwdelta_pu = get_pvalue_pw(delta_sim2, pwdelta_obs$pwdelta, effective_sample2),
+        pwdelta_pl = sum(unlist(sapply(delta_sim, function(x) x[["pwdelta"]])) <= pwdelta_obs$pwdelta) / effective_sample,
+        pwdelta_pu = sum(unlist(sapply(delta_sim2, function(x) x[["uwdelta"]])) >= pwdelta_obs$pwdelta) / effective_sample2,
         prog_Rsq = pwdelta_obs$prog_Rsq,
         bal_Rsq = pwdelta_obs$bal_Rsq
       )
