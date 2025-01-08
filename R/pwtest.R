@@ -158,7 +158,7 @@ pwtest <- function(data,
     dat_pw[[treatment]][1:length(treat_i)] <- 1
 
     # permutation under equivalence test (second one-sided test using upper bound)
-    dat_uw[[outcome]][1:length(treat_i)] <- dat_uw[[outcome]] - equiv_upper
+    dat_uw[[outcome]][1:length(treat_i)] <- dat_uw[[outcome]] + equiv_upper
 
     uwdelta_sim <- safe_delta(uw_delta, dat_uw, uwdelta_obs, covariates, treatment, outcome, standardize = FALSE)
     pwdelta_sim <- safe_delta(pw_delta, dat_pw, pwdelta_obs, covariates, treatment, outcome, standardize = TRUE, DIM = uwdelta_sim$dim, simulation = simulation)
