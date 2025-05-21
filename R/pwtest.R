@@ -11,8 +11,8 @@
 #' @param rdd logical value. Whether test statistics are calculated using continuous RDD approach.
 #' @param rd_estimator character. Whether to use the conventional ("h") or the bias-corrected local-polynomial point estimator ("b"). See `rdrobust()` for more details. Defaults to conventional estimate ("h").
 #' @param equivalence logical value. If TRUE, carry out equivalence test as described in Hartman and Hidalgo (2018). For a full description of the bootstrapping procedure, see paper.
-#' @param equiv_lower numerical value. If `equivalence = TRUE`, lower bound of the equivalence range as a multiplier for the standard deviation of potential outcomes under control.
-#' @param equiv_upper numerical value. If `equivalence = TRUE`, upper bound of the equivalence range as a multiplier for the standard deviation of potential outcomes under control.
+#' @param equiv_lower numerical value. If `equivalence = TRUE`, lower bound of the equivalence range as a multiplier for the standard deviation of potential outcomes under control. Takes 0.36 value by default (see Hartman and Hidalgo (2018)).
+#' @param equiv_upper numerical value. If `equivalence = TRUE`, upper bound of the equivalence range as a multiplier for the standard deviation of potential outcomes under control. Takes 0.36 value by default (see Hartman and Hidalgo (2018)).
 #' @param ... arguments passed onto `rdrobust()` function
 #' @import rdrobust
 #' @importFrom stats pnorm
