@@ -247,6 +247,42 @@ pwtest <- function(data,
     }
   }
 
+  # oversample for upper bound distribution of equivalence test
+  if (oversample &
+      (!identical(effective_sample2, as.integer(nsims)))) {
+    # re-sample until effective is equal or greater to bootstrap sample size argument
+    while (effective_sample2 < as.integer(nsims)) {
+      samples <- get_bootstrap_samples(control_i, length(treat_i), nsims-effective_sample2)
+
+      # restrict bootstrap sample to complete observations
+
+      # obtain delta distribution based on resamples
+      delta_sim_add <- apply(samples, 2, function(z) {
+        dat_uw <- data_stdc[z, ]
+        # change treatment condition from control to treatment for sample
+        dat_uw[[treatment]][1:length(treat_i)] <- 1
+
+        dat_pw <- data[z, ]
+        # change treatment condition from control to treatment for sample
+        dat_pw[[treatment]][1:length(treat_i)] <- 1
+
+
+        uwdelta_sim <- safe_delta(uw_delta, dat_uw, uwdelta_obs, covariates, treatment, outcome, standardize = FALSE)
+        pwdelta_sim <- safe_delta(pw_delta, dat_pw, pwdelta_obs, covariates, treatment, outcome, standardize = TRUE, DIM = uwdelta_sim$dim, simulation = simulation)
+        return(c(uwdelta_sim, pwdelta_sim))
+      })
+
+      delta_sim2 <- c(delta_sim2, delta_sim_add)
+      na_check <- sapply(delta_sim2, function(e) !is.na(e[["uwdelta"]]) & !is.na(e[["pwdelta"]]))
+      delta_sim2 <- delta_sim2[na_check]
+      effective_sample2 <- sum(na_check)
+    }
+    # if bootstrap sample greater than argument, randomly select samples to match sample size argument
+    if (effective_sample2 > as.integer(nsims)) {
+      delta_sim2 <- delta_sim2[sample(1:length(delta_sim2), nsims, replace = FALSE)]
+    }
+  }
+
   # SEs as SD of sampling distribution
   uwdelta_se2 <- sd(unlist(sapply(delta_sim, function(x) x[["uwdelta"]])), na.rm = TRUE) * (nsims - 1) / nsims
 
