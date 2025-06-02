@@ -13,6 +13,8 @@
 #' @param equivalence logical value. If TRUE, carry out equivalence test as described in Hartman and Hidalgo (2018). For a full description of the bootstrapping procedure, see paper.
 #' @param equiv_lower numerical value. If `equivalence = TRUE`, lower bound of the equivalence range as a multiplier for the standard deviation of potential outcomes under control. Takes 0.36 value by default (see Hartman and Hidalgo (2018)).
 #' @param equiv_upper numerical value. If `equivalence = TRUE`, upper bound of the equivalence range as a multiplier for the standard deviation of potential outcomes under control. Takes 0.36 value by default (see Hartman and Hidalgo (2018)).
+#' @param method character name of function to model (or train a model on) $Y^C(0)$, e.g., "glm", "ranger", "gxboost". Must be a function that returns an object of class compatible with `predict()`. Include additional function arguments in the call (`...`), otherwise default argument values for each method are supplied where default is specified. Requires package containing function to be installed and loaded separately.
+#' @param predict_args named list. If using a non-linear model (e.g., "glm", "ranger", "xgb.train"), specify arguments passed onto `predict()` function for object of class returned by the function specified in `model` argument. For example, if `method = "ranger"`, this argument will defined the values passed onto to `predict.ranger()` to fit values of $Y^T(C)$.
 #' @param ... arguments passed onto `rdrobust()` function
 #' @import rdrobust
 #' @importFrom stats pnorm
@@ -29,6 +31,8 @@ pwtest <- function(data,
                    equivalence = FALSE,
                    equiv_lower = NULL,
                    equiv_upper = NULL,
+                   method = "lm",
+                   predict_args = NULL,
                    ...) {
   require(rdrobust)
   argg <- as.list(match.call())
@@ -48,7 +52,7 @@ pwtest <- function(data,
     stop("`se_type` must take be set to either 'analytic', 'bootstrap', 'conventional', 'bias-corrected', 'robust'.")
   }
 
-  if(rdd & equivalence) stop("The equivalence test feature is not yet compatible with RDD designs.")
+  if(rdd & equivalence) stop("The equivalence test approach is not yet compatible with RDD designs.")
 
   # restrict data to variables of interest
   data <- data %>% dplyr::select(tidyselect::all_of(c(treatment, covariates, running_var, outcome)))
@@ -60,23 +64,57 @@ pwtest <- function(data,
 
   # observed statistics-------------------------------------
 
+  # any arguments not supplied take default values
+  argg_def <- formals()
+  missing_args <- setdiff(names(argg_def)[!names(argg_def) %in% names(argg)], "...")
+  argg_add <- setNames(argg_def[missing_args], missing_args)
+  argg <- c(argg, argg_add)
+  argg$standardize <- TRUE
+  argg$DIM <- uwdelta_obs$dim
+
   if (!rdd) {
-    uwdelta_obs <- uw_delta(data, covariates, treatment, outcome,
-                            standardize = TRUE,
-                            simulation = simulation
-    )
-    pwdelta_obs <- pw_delta(data, covariates, treatment, outcome,
-                            standardize = TRUE,
-                            DIM = uwdelta_obs$dim,
-                            simulation = simulation
-    )
+    uwdelta_obs <- do.call("uw_delta", args = argg)
+    # linear regression, default pw method
+    if(method == "lm"){
+      pwdelta_obs <- do.call("pw_delta", args = argg)
+    } else {
+      # non-linear methods
+      # REVIEW NOT SURE WE SHOULD STANDARDIZE IN THESE CASES
+      # standardize data relative to entire study group (the finite population)
+      if(standardize){
+        data <- data %>%
+          dplyr::mutate_at(.vars = c(outcome, covariates),
+                           .funs = stdr) %>% as.data.frame()
+      }
+      argg$data <- data[data[[treatment]]==0,]
+
+      # SPECIFY/TRANSLATE ARGUMENT NAMES TO BE PASSED ONTO SUBSET OF
+      # "COMPATIBLE" MODELS
+      relabel_args <- function(argg, method){
+        if(method == "glmnet"){
+          argg$x <- as.matrix(argg$data[,covariates])
+          argg$y <- argg$data[[outcome]]
+        }
+        if(method %in% c("xgboost", "xgb.train")){
+
+        }
+        if(method %in% c("gbart", "pbart", "lbart", "wbart", "mc.gbart")){
+          argg$x.train <- argg$data[,covariates]
+          argg$y.train <- argg$data[[outcome]]
+        }
+        return(argg)
+      }
+
+      argg <- relabel_args(argg, method)
+      m_output <- do.call(method, args = argg)
+      predict_args$object <- m_output
+      predict_args$data <- data[data[[treatment]] == 1,]
+      predict_args$newdata <- data[data[[treatment]] == 1,]
+      m_fit_YT0 <- do.call("predict", args = predict_args)
+      pwdelta_obs <- mean(m_fit_YT0, na.rm = TRUE) - mean(argg$data[[outcome]])
+    }
   } else {
-    # any arguments not supplied take `pw_delta_rdd` default values
-    argg$standardize <- TRUE
-    argg_def <- formals()
-    missing_args <- setdiff(names(argg_def)[!names(argg_def) %in% names(argg)], "...")
-    argg_add <- setNames(argg_def[missing_args], missing_args)
-    argg <- c(argg, argg_add)
+    # test of continuity (RD designs)
     pwdelta_obs <- do.call("pw_delta_rdd", args = argg)
   }
 
@@ -120,8 +158,33 @@ pwtest <- function(data,
 
     if (!rdd) {
       uwdelta_sim <- safe_delta(uw_delta, dat_uw, uwdelta_obs, covariates, treatment, outcome, standardize = FALSE)
-      pwdelta_sim <- safe_delta(pw_delta, dat_pw, pwdelta_obs, covariates, treatment, outcome, standardize = TRUE, DIM = uwdelta_sim$dim, simulation = simulation)
+
+      if(method == "lm"){
+        pwdelta_sim <- safe_delta(pw_delta, dat_pw, pwdelta_obs, covariates, treatment, outcome, standardize = TRUE, DIM = uwdelta_sim$dim, simulation = simulation)
+
+      } else {
+        # non-linear methods
+        # standardize data relative to entire study group (the finite population)
+        if(standardize){
+          dat_pw <- dat_pw %>%
+            dplyr::mutate_at(.vars = c(outcome, covariates),
+                             .funs = stdr) %>% as.data.frame()
+        }
+
+        predict_args$object <- m_output
+        predict_args$data <- dat_pw[dat_pw[[treatment]] == 1,]
+        predict_args$newdata <- dat_pw[dat_pw[[treatment]] == 1,]
+        m_fit_YT0 <- do.call("predict", args = predict_args)
+
+        predict_args$data <- dat_pw[dat_pw[[treatment]] == 0,]
+        predict_args$newdata <- dat_pw[dat_pw[[treatment]] == 0,]
+        m_fit_YC0 <- do.call("predict", args = predict_args)
+
+        pwdelta_obs <- mean(m_fit_YT0, na.rm = TRUE) - mean(m_fit_YC0, na.rm = TRUE)
+      }
+
       return(c(uwdelta_sim, pwdelta_sim))
+
     } else {
       bs_t <- dat_pw[[treatment]] == 1
       # invert the running variable for the bootstrap sample of treatment observations
@@ -309,23 +372,26 @@ pwtest <- function(data,
   # output ------------------------------------------------------------------
 
   if (!rdd) {
-    if(!equivalence){
-      estimates <- c(
-        uwdelta_obs[-length(uwdelta_obs)],
-        uwdelta_se = switch(se_type,
-                            analytic = uwdelta_obs$uwdelta_se,
-                            bootstrap = uwdelta_se2
-        ),
-        uwdelta_p = get_pvalue_uw(delta_sim,  uwdelta_obs$uwdelta, effective_sample),
-        # number of unique bootstrap samples (if different from nsims)
-        n_bootstrap = effective_sample,
-        pwdelta_obs,
-        pwdelta_se = unname(pwdelta_se),
-        pwdelta_p = get_pvalue_pw(delta_sim, pwdelta_obs$pwdelta, effective_sample),
-        prog_Rsq = pwdelta_obs$prog_Rsq,
-        bal_Rsq = pwdelta_obs$bal_Rsq
-      )
-    }else{
+      if(method == "lm"){
+        if(!equivalence){
+        estimates <- c(
+          uwdelta_obs[-length(uwdelta_obs)],
+          uwdelta_se = switch(se_type,
+                              analytic = uwdelta_obs$uwdelta_se,
+                              bootstrap = uwdelta_se2
+          ),
+          uwdelta_p = get_pvalue_uw(delta_sim,  uwdelta_obs$uwdelta, effective_sample),
+          # number of unique bootstrap samples (if different from nsims)
+          n_bootstrap = effective_sample,
+          pwdelta_obs,
+          pwdelta_se = unname(pwdelta_se),
+          pwdelta_p = get_pvalue_pw(delta_sim, pwdelta_obs$pwdelta, effective_sample),
+          prog_Rsq = pwdelta_obs$prog_Rsq,
+          prog_Rsq_mean = mean(delta_sim$prog_Rsq, na.rm = TRUE),
+          bal_Rsq = pwdelta_obs$bal_Rsq,
+          bal_Rsq_mean = mean(delta_sim$bal_Rsq, na.rm = TRUE)
+        )
+    } else {
       estimates <- c(
         uwdelta_obs[-length(uwdelta_obs)],
         uwdelta_se = switch(se_type,
@@ -341,13 +407,35 @@ pwtest <- function(data,
         pwdelta_pl = sum(unlist(sapply(delta_sim, function(x) x[["pwdelta"]])) <= pwdelta_obs$pwdelta) / effective_sample,
         pwdelta_pu = sum(unlist(sapply(delta_sim2, function(x) x[["uwdelta"]])) >= pwdelta_obs$pwdelta) / effective_sample2,
         prog_Rsq = pwdelta_obs$prog_Rsq,
-        bal_Rsq = pwdelta_obs$bal_Rsq
+        prog_Rsq_mean = mean(delta_sim$prog_Rsq, na.rm = TRUE),
+        bal_Rsq = pwdelta_obs$bal_Rsq,
+        bal_Rsq_mean = mean(delta_sim$bal_Rsq, na.rm = TRUE)
       )
 
       estimates <- c(estimates,
                      uwdelta_equivtest = ifelse(estimates[["uwdelta_pl"]] < .05 & estimates[["uwdelta_pu"]] < .05, "Reject", "Fail to reject"),
                      pwdelta_equivtest = ifelse(estimates[["pwdelta_pl"]] < .05 & estimates[["pwdelta_pu"]] < .05, "Reject", "Fail to reject"))
     }
+      } else {
+        #non-linear methods
+        estimates <- list(
+          uwdelta_obs[-length(uwdelta_obs)],
+          uwdelta_se = switch(se_type,
+                              analytic = uwdelta_obs$uwdelta_se,
+                              bootstrap = uwdelta_se2
+          ),
+          uwdelta_p = get_pvalue_uw(delta_sim,  uwdelta_obs$uwdelta, effective_sample),
+          # number of unique bootstrap samples (if different from nsims)
+          n_bootstrap = effective_sample,
+          pwdelta = pwdelta_obs,
+          pwdelta_se = unname(pwdelta_se),
+          pwdelta_p = get_pvalue_pw(delta_sim, pwdelta_obs$pwdelta, effective_sample),
+          prog_Rsq = pwdelta_obs$prog_Rsq,
+          prog_Rsq_mean = mean(delta_sim$prog_Rsq, na.rm = TRUE),
+          bal_Rsq = pwdelta_obs$bal_Rsq,
+          bal_Rsq_mean = mean(delta_sim$bal_Rsq, na.rm = TRUE)
+        )
+      }
   } else {
     estimates <- list(
       dii = pwdelta_obs$dii,
