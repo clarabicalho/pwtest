@@ -91,17 +91,3 @@ pwtest <- function(data,
 
   return(estimates)
 }
-
-
-# Example:
-library(tidymodels)
-source("~/Library/CloudStorage/Dropbox/Github-Cloud/prognostic_balance/code/simulations/R/simulate_experiment_poly_4.R")
-
-data <- simulate_experiment(N = 1000, imbalance = rep(.2, 3), prognosis = c(.3, .2, .1), poly = c(2, 1))
-
-pwstat <- pwtest(data, covariates = c("X1", "X2", "X1_2"), spec_mod = rand_forest(mode = "regression"), n_bootstraps = 200)
-pwstat2 <- pwtest(data, covariates = c("X1", "X2", "X1_2"), spec_mod = linear_reg(mode = "regression"), n_bootstraps = 200)
-
-pwstat2 <- pwtest(data, covariates = c("X1", "X2", "X1_2"),
-                  spec_mod = linear_reg(mode = "regression", penalty = .5),
-                  engine = "glmnet", n_bootstraps = 200)
