@@ -9,7 +9,11 @@
 #' @param model_spec an object of class `model_spec` defining the functional form of the prediction model to fit $Y^C(0)$ on covariate matrix. See https://www.tidymodels.org/find/parsnip/#models for all available models.
 #' @param engine character. Engine type used for the model specified in `model_spec`. See https://www.tidymodels.org/find/parsnip/#models for all available engines for each model. If not defined, uses default engine defined by `model_spec` type in package `parsnip`, if available.
 #' @param formula object of class formula or character describing the model to fit `model_spec` on control sample. Defaults to regressing outcome on full set of covariates defined by `covariates`.
-#' @import tidymodels
+#' @importFrom parsnip linear_reg fit set_engine
+#' @importFrom yardstick metrics
+#' @importFrom stats predict sd setNames as.formula t.test
+#' @importFrom dplyr bind_cols select mutate_at
+#' @importFrom rlang sym
 #' @export
 
 pwtest <- function(data,
@@ -17,32 +21,36 @@ pwtest <- function(data,
                    treatment = "Z",
                    outcome = "Y",
                    n_bootstraps = 500, # in models other than lm, the bootstrap sample also defines the training sample
-                   spec_mod = linear_reg(mode = "regression", engine = "lm"),
+                   model_spec = linear_reg(mode = "regression", engine = "lm"),
                    engine = NULL,
                    formula = NULL) {
 
+  # default regression model
   if(is.null(formula)) formula <- as.formula(paste0(outcome, "~."))
 
   # restrict data to variables of interest
-  data <- data %>% dplyr::select(tidyselect::all_of(c(treatment, covariates, outcome)))
+  data <- data[,c(treatment, covariates, outcome)]
 
   # observed statistics-------------------------------------
 
   # standardize data relative to entire study group (the finite population)
   data <- data %>%
-    dplyr::mutate_at(.vars = c(outcome, covariates),
-                     .funs = scale) %>% as.data.frame()
+    mutate_at(.vars = c(outcome, covariates),
+              .funs = scale) %>% as.data.frame()
 
   # define model engine
-  if(!is.null(engine)) spec_mod <- spec_mod %>% set_engine(engine)
+  if(!is.null(engine)) model_spec <- model_spec %>% set_engine(engine)
 
-  # train data, Yc(0)
-  datc <- data %>% filter(!!sym(treatment) == 0) %>% dplyr::select(all_of(c(outcome, covariates)))
+  treat_i <- which(data[[treatment]] == 1)
+  control_i <- which(data[[treatment]] == 0)
 
-  # test data, Yt(0)
-  datt <- data %>% filter(!!sym(treatment) == 1) %>% dplyr::select(all_of(c(outcome, covariates)))
+  # data to fit Yc(0)
+  datc <- data[control_i, c(outcome, covariates)]
 
-  fit_Yc <- spec_mod %>% fit(formula = formula, data = datc)
+  # data to predict Yt(0)
+  datt <- data[treat_i, c(outcome, covariates)]
+
+  fit_Yc <- model_spec %>% fit(formula = formula, data = datc)
 
   # extract standard metrics
   fit_metrics <- predict(fit_Yc, datc) %>%
@@ -50,14 +58,12 @@ pwtest <- function(data,
 
   predict_Yt <-  predict(fit_Yc, datt)
 
-  # observed \overline{Y^T(0)} - \overline{Y^C(0)}
+  # observed \overline{\widehat{Y^T(0)}} - \overline{Y^C(0)}
   pwdelta_obs <-  mean(predict_Yt$.pred) - mean(datc$Y)
 
   # bootstrapping -------------------------------------
 
   # resample from control group with replacement
-  treat_i <- which(data[[treatment]] == 1)
-  control_i <- which(data[[treatment]] == 0)
   samples <- get_bootstrap_samples(control_i, length(treat_i), n_bootstraps)
 
   # standardize bootstrap population relative to control group SD
@@ -75,19 +81,100 @@ pwtest <- function(data,
     return(list(pwdelta=dY))
   })
 
-  # SE and p-value from bootstrap distribution
-  pwdelta_se <- sd(unlist(sapply(bstats, function(x) x$pwdelta)), na.rm = TRUE) * (n_bootstraps - 1) / n_bootstraps
-  pw_delta_p <- sum(abs(unlist(sapply(bstats, function(x) x$pwdelta))) >= abs(pwdelta_obs), na.rm = TRUE) / n_bootstraps
+  # check for completeness and draw additional bootstrap samples if necessary
+  nc_bootstraps <- sum(!is.na(sapply(bstats, function(x) x$pwdelta)))
+
+  while (nc_bootstraps < as.integer(n_bootstraps)) {
+    add_samples <- get_bootstrap_samples(control_i, length(treat_i), n_bootstraps-nc_bootstraps)
+
+    # obtain delta distribution from bootstrap samples
+    add_bstats <- apply(add_samples, 2, function(z) {
+      bsample <- data_stdc[z, ]
+      bsample[[treatment]][1:length(treat_i)] <- 1
+
+      predict_Yc <- predict(fit_Yc, bsample[bsample[[treatment]] == 0, ])
+      predict_Yt <-  predict(fit_Yc, bsample[bsample[[treatment]] == 1, ])
+      dY <- mean(predict_Yt$.pred) - mean(predict_Yc$.pred)
+
+      return(list(pwdelta=dY))
+    })
+
+    bstats <- c(bstats, add_bstats)
+    ncbootstraps <- sum(!is.na(sapply(bstats, function(x) x$pwdelta)))
+  }
+
+  # SE bootstrap distribution
+  pwdelta_se <- sd(unlist(sapply(bstats, function(x) x$pwdelta)), na.rm = TRUE) * (n_bootstraps - 1) / n_bootstraps %>% unname
+
+  # always estimate pwdelta from linear model unless model_spec is lm -------
+
+  # extract arguments (default and user-supplied) from parent function
+  argg <- as.list(match.call())[-1]
+  arg_formals <- formals(pwtest) ## formals with default arguments
+  for (v in names(arg_formals)){
+    if (!(v %in% names(argg)))
+      ## if arg value is missing, add its default
+      argg <- append(argg, arg_formals[v])
+  }
+
+  # modify relevant arguments to fit linear regression
+  if(!"linear_reg" %in% class(model_spec)){
+    argg$model_spec <- linear_reg(mode = "regression", engine = "lm")
+    argg$engine <- NULL; argg$formula <- NULL
+    pwtest_lm <- do.call("pwtest", args = argg)
+  } else {
+    pwtest_lm <- NULL
+  }
+
+
+  # difference in means -----------------------------------------------------
+  dim_ests <- sapply(covariates, function(x){
+    tres <- t.test(data[treat_i, x], data[control_i, x], na.rm = TRUE)
+    dim <- tres$estimate[1] - tres$estimate[2]
+    return(c(dim = unname(dim), ttest_p = tres$p.value))
+  })
+
+  # prognosis ---------------------------------------------------------------
+  if(is.null(pwtest_lm)) prognosis <- coef(fit_Yc$fit)
+  else prognosis <- coef(pwtest_lm$fit_obj[[1]]$fit)
+
+  cov_table <- t(rbind(prognosis = prognosis[covariates], dim_ests))
 
   # output ------------------------------------------------------------------
-  estimates <- list(
+
+  #pwdelta estimates
+  est_data <- data.frame(
+    method = class(model_spec)[1],
+    engine = ifelse(is.null(engine), "default", engine),
+    formula = deparse(formula),
     n_bootstraps = n_bootstraps,
     pwdelta = pwdelta_obs,
-    pwdelta_se = unname(pwdelta_se),
-    pwdelta_p = get_pvalue_pw(bstats, pwdelta_obs, n_bootstraps),
-    fit_obj = fit_Yc,
-    fit_metrics = fit_metrics
+    pwdelta_se = pwdelta_se,
+    pwdelta_p = get_pvalue_pw(bstats, pwdelta_obs, n_bootstraps)
   )
+
+  # append estimates from linear regression if missing
+  if(!is.null(pwtest_lm)) {
+    est_data <- rbind(est_data, pwtest_lm$estimates)
+
+    estimates <- list(
+      estimates = est_data,
+      cov_table = cov_table,
+      fit_obj = list(pwtest_lm$fit_obj[[1]], fit_Yc),
+      fit_metrics = rbind(
+        pwtest_lm$fit_metrics,
+        cbind(model = class(model_spec)[1], fit_metrics)
+      )
+    )
+
+  } else {
+    estimates <- list(
+      estimates = est_data,
+      cov_table = cov_table,
+      fit_obj = list(fit_Yc),
+      fit_metrics = cbind(model = class(model_spec)[1], fit_metrics)
+    )
+  }
 
   return(estimates)
 }

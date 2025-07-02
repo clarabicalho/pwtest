@@ -20,4 +20,8 @@ Imports:
   magrittr,
   tidyr,
   tidyselect,
-  tidymodels
+  tidymodels,
+  stats,
+  rlang,
+  parsnip,
+  yardstick

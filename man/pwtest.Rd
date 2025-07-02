@@ -10,7 +10,7 @@ pwtest(
   treatment = "Z",
   outcome = "Y",
   n_bootstraps = 500,
-  spec_mod = linear_reg(mode = "regression", engine = "lm"),
+  model_spec = linear_reg(mode = "regression", engine = "lm"),
   engine = NULL,
   formula = NULL
 )
@@ -26,6 +26,8 @@ pwtest(
 
 \item{n_bootstraps}{numeric scalar indicating number of bootstraps to use for the resampling-based p-values}
 
+\item{model_spec}{an object of class \code{model_spec} defining the functional form of the prediction model to fit $Y^C(0)$ on covariate matrix. See https://www.tidymodels.org/find/parsnip/#models for all available models.}
+
 \item{engine}{character. Engine type used for the model specified in \code{model_spec}. See https://www.tidymodels.org/find/parsnip/#models for all available engines for each model. If not defined, uses default engine defined by \code{model_spec} type in package \code{parsnip}, if available.}
 
 \item{formula}{object of class formula or character describing the model to fit \code{model_spec} on control sample. Defaults to regressing outcome on full set of covariates defined by \code{covariates}.}
@@ -33,8 +35,6 @@ pwtest(
 \item{equivalence}{logical value. If TRUE, carry out equivalence test as described in Hartman and Hidalgo (2018). For a full description of the bootstrapping procedure, see paper.}
 
 \item{equiv_bounds}{numerical vector. If \code{equivalence = TRUE}, lower and upper bounds respectively of the equivalence range as a multiplier for the standard deviation of potential outcomes under control. Both values are set to 0.36 if set to \code{NULL} (see Hartman and Hidalgo (2018)).}
-
-\item{model_spec}{an object of class \code{model_spec} defining the functional form of the prediction model to fit $Y^C(0)$ on covariate matrix. See https://www.tidymodels.org/find/parsnip/#models for all available models.}
 }
 \description{
 Produces unweighted and prognosis-weighted test statistics with standard errors and p-values
