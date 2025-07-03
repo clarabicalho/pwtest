@@ -340,7 +340,7 @@ pwtest <- function(data,
   return(estimates)
 }
 
-#' High-level wrapper for prognostic balance testing with automatic model selection
+#' Wrapper for pwtest with option for automatic model selection
 #' @param data data.frame containing covariates, treatment assignment, and outcome variable
 #' @param method character. Either "auto" for automatic model selection via contest() or "manual" for user-specified parameters
 #' @param cv_folds integer. Number of cross-validation folds for contest() when method="auto"
