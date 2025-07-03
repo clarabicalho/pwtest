@@ -19,4 +19,9 @@ Imports:
   dplyr,
   magrittr,
   tidyr,
-  tidyselect
+  tidyselect,
+  tidymodels,
+  stats,
+  rlang,
+  parsnip,
+  yardstick

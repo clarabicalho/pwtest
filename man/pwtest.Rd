@@ -8,15 +8,11 @@ pwtest(
   data,
   covariates = c("X1", "X2", "X3"),
   treatment = "Z",
-  running_var = NULL,
   outcome = "Y",
-  nsims = 500,
-  oversample = FALSE,
-  se_type = "analytic",
-  simulation = FALSE,
-  rdd = FALSE,
-  rd_estimator = "h",
-  ...
+  n_bootstraps = 500,
+  model_spec = linear_reg(mode = "regression", engine = "lm"),
+  engine = NULL,
+  formula = NULL
 )
 }
 \arguments{
@@ -26,23 +22,19 @@ pwtest(
 
 \item{treatment}{name of variable indicating (binary) treatment assigned}
 
-\item{running_var}{character string with running variable name. Ignored unless \code{rdd = TRUE}.}
-
 \item{outcome}{name of outcome variable}
 
-\item{nsims}{numeric scalar indicating number of bootstraps to use for the resampling-based p-values}
+\item{n_bootstraps}{numeric scalar indicating number of bootstraps to use for the resampling-based p-values}
 
-\item{oversample}{logical value. If \code{FALSE}, function gives resampling-based p-values using number of working bootstrap samples (which did not return an error) and prints a warning when that sample is smaller than the value in \code{nsims}. If \code{oversample = TRUE}, function continues to re-sample until number of working bootstrap samples reaches \code{nsims}.}
+\item{model_spec}{an object of class \code{model_spec} defining the functional form of the prediction model to fit $Y^C(0)$ on covariate matrix. See https://www.tidymodels.org/find/parsnip/#models for all available models.}
 
-\item{se_type}{character string. Determines which type of standard error should be returned with the unweighted delta estimate. Takes the values of either \code{"analytic"} or \code{"bootstrap"} for non RDD cases, and can also take values "conventional", "bias-adjusted", and "robust" standard errors returned by \code{rdrobust} (when \code{rdd = TRUE}). If set to "analytic" in the latter, default results will use conventional standard errors.}
+\item{engine}{character. Engine type used for the model specified in \code{model_spec}. See https://www.tidymodels.org/find/parsnip/#models for all available engines for each model. If not defined, uses default engine defined by \code{model_spec} type in package \code{parsnip}, if available.}
 
-\item{simulation}{logical value.}
+\item{formula}{object of class formula or character describing the model to fit \code{model_spec} on control sample. Defaults to regressing outcome on full set of covariates defined by \code{covariates}.}
 
-\item{rdd}{logical value. Whether test statistics are calculated using continuous RDD approach.}
+\item{equivalence}{logical value. If TRUE, carry out equivalence test as described in Hartman and Hidalgo (2018). For a full description of the bootstrapping procedure, see paper.}
 
-\item{rd_estimator}{character. Whether to use the conventional ("h") or the bias-corrected local-polynomial point estimator ("b"). See \code{rdrobust()} for more details. Defaults to conventional estimate ("h").}
-
-\item{...}{arguments passed onto \code{rdrobust()} function}
+\item{equiv_bounds}{numerical vector. If \code{equivalence = TRUE}, lower and upper bounds respectively of the equivalence range as a multiplier for the standard deviation of potential outcomes under control. Both values are set to 0.36 if set to \code{NULL} (see Hartman and Hidalgo (2018)).}
 }
 \description{
 Produces unweighted and prognosis-weighted test statistics with standard errors and p-values
