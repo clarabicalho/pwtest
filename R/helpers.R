@@ -365,15 +365,15 @@ contest <- function(data_control, covariates, outcome, cv_folds = 5, debug = TRU
   require(rsample)
   require(scales)
   
-  if(debug) cat("=== DEBUGGING CONTEST FUNCTION ===\n")
+  if(debug) cat("=== DEBUGGING ===\n")
   
-  # PHASE 1: INPUT DATA DIAGNOSTICS
+  # Input data diagnostics
   analysis_data <- data_control %>%
     dplyr::select(tidyselect::all_of(c(outcome, covariates))) %>%
     tidyr::drop_na()
   
   if(debug) {
-    cat("\n--- PHASE 1: INPUT DATA DIAGNOSTICS ---\n")
+    cat("\n--- Input data diagnostics ---\n")
     cat("Original data dimensions:", nrow(data_control), "x", ncol(data_control), "\n")
     cat("Analysis data dimensions:", nrow(analysis_data), "x", ncol(analysis_data), "\n")
     cat("Outcome variable:", outcome, "\n")
@@ -400,11 +400,11 @@ contest <- function(data_control, covariates, outcome, cv_folds = 5, debug = TRU
     stop("Insufficient data for cross-validation. Need at least ", cv_folds, " observations, got ", nrow(analysis_data))
   }
   
-  # PHASE 2: CV SETUP DIAGNOSTICS
+  # CV Diagnostics
   cv_folds_obj <- vfold_cv(analysis_data, v = cv_folds, strata = NULL)
   
   if(debug) {
-    cat("\n--- PHASE 2: CV SETUP DIAGNOSTICS ---\n")
+    cat("\n--- CV Diagnostics ---\n")
     fold_sizes <- purrr::map_dbl(cv_folds_obj$splits, function(split) nrow(rsample::assessment(split)))
     fold_train_sizes <- purrr::map_dbl(cv_folds_obj$splits, function(split) nrow(rsample::analysis(split)))
     
@@ -425,7 +425,7 @@ contest <- function(data_control, covariates, outcome, cv_folds = 5, debug = TRU
     cat("Outcome variance in training folds:", paste(round(fold_outcome_vars, 4), collapse = ", "), "\n")
   }
   
-  # PHASE 3: RECIPE CREATION AND DIAGNOSTICS
+  # Recipe creation and diagnostics
   base_recipe <- recipe(as.formula(paste(outcome, "~ .")), data = analysis_data)
   
   # Create more conservative recipes with normalization
@@ -446,7 +446,7 @@ contest <- function(data_control, covariates, outcome, cv_folds = 5, debug = TRU
     step_corr(all_predictors(), threshold = 0.95)
   
   if(debug) {
-    cat("\n--- PHASE 3: RECIPE DIAGNOSTICS ---\n")
+    cat("\n--- Recipe Diagnostics ---\n")
     
     # Test recipe preprocessing
     tryCatch({
@@ -481,7 +481,7 @@ contest <- function(data_control, covariates, outcome, cv_folds = 5, debug = TRU
     })
   }
   
-  # PHASE 4: MODEL SPECIFICATIONS
+  # Model specifications
   linear_spec <- linear_reg() %>% set_engine("lm")
   
   # Create more conservative lasso penalty grid based on dataset size
@@ -489,7 +489,7 @@ contest <- function(data_control, covariates, outcome, cv_folds = 5, debug = TRU
   n_features_base <- length(covariates)
   
   if(debug) {
-    cat("\n--- PHASE 4: LASSO PARAMETER TUNING ---\n")
+    cat("\n--- Lasso tuning ---\n")
     cat("Sample size:", n_obs, "\n")
     cat("Base features:", n_features_base, "\n")
   }
@@ -531,7 +531,7 @@ contest <- function(data_control, covariates, outcome, cv_folds = 5, debug = TRU
     set_engine("xgboost") %>%
     set_mode("regression")
   
-  # PHASE 5: WORKFLOW CREATION
+  # Workflow creation
   targeted_workflows <- tibble(
     wflow_id = c("linear", "linear_poly", "linear_interact", "linear_poly_interact",
                  "lasso_poly", "lasso_interact", "lasso_poly_interact", 
@@ -552,9 +552,9 @@ contest <- function(data_control, covariates, outcome, cv_folds = 5, debug = TRU
   # Use robust metrics
   robust_metrics <- metric_set(rmse, rsq)
   
-  # PHASE 6: MODEL FITTING WITH DETAILED ERROR CAPTURE
+  # Model fitting
   if(debug) {
-    cat("\n--- PHASE 6: MODEL FITTING ---\n")
+    cat("\n--- Model fitting ---\n")
     cat("Models to fit:", paste(targeted_workflows$wflow_id, collapse = ", "), "\n")
     cat("Number of workflows created:", nrow(targeted_workflows), "\n")
   }
@@ -678,8 +678,8 @@ contest <- function(data_control, covariates, outcome, cv_folds = 5, debug = TRU
     print(results_summary)
   }
   
-  # PHASE 7: RESULTS EXTRACTION AND DIAGNOSTICS
-  if(debug) cat("\n--- PHASE 7: RESULTS ANALYSIS ---\n")
+  # Results extraction
+  if(debug) cat("\n--- Results ---\n")
   
   model_performance <- results %>%
     dplyr::mutate(
@@ -787,7 +787,7 @@ contest <- function(data_control, covariates, outcome, cv_folds = 5, debug = TRU
   
   best_engine <- best_spec$engine
   
-  # Extract recipe if needed - ENHANCED for prognostic_balance integration
+  # Extract recipe
   best_recipe <- NULL
   if (best_model_name %in% c("linear_poly", "linear_interact", "linear_poly_interact",
                              "lasso_poly", "lasso_interact", "lasso_poly_interact")) {
@@ -817,7 +817,7 @@ contest <- function(data_control, covariates, outcome, cv_folds = 5, debug = TRU
     linear_cv_rsq <- model_performance$best_rsq[best_model_idx]
   }
   
-  if(debug) cat("\n=== CONTEST FUNCTION COMPLETE ===\n")
+  if(debug) cat("\n=== Results ===\n")
   
   # Return comprehensive results object optimized for prognostic_balance() integration
   contest_results <- list(
