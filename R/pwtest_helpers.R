@@ -1,6 +1,6 @@
 # pwtest helpers
 
-# Generate bootstrap samples
+#' Generate bootstrap samples
 get_bootstrap_samples <- function(control_indices, treatment_n, bootstrap_n) {
   replicate(
     bootstrap_n,
@@ -39,7 +39,7 @@ std_data <- function(data, variables, treatment_col) {
 }
 
 get_pvalue_uw <- function(sim_d, ref_d, bootstrap_n){
-  sum(abs(unlist(sapply(sim_d, function(x) x[["uwdelta"]]))) >= abs(ref_d)) / bootstrap_n
+  sum(abs(sim_d) >= abs(ref_d)) / bootstrap_n
 }
 
 get_pvalue_pw <- function(sim_d, ref_d, bootstrap_n){
