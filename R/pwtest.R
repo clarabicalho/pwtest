@@ -100,7 +100,7 @@ pwtest <- function(data,
     })
 
     bstats <- c(bstats, add_bstats)
-    ncbootstraps <- sum(!is.na(sapply(bstats, function(x) x$pwdelta)))
+    nc_bootstraps <- sum(!is.na(sapply(bstats, function(x) x$pwdelta)))
   }
 
   # SE bootstrap distribution
