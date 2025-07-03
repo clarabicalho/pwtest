@@ -140,6 +140,11 @@ pwtest <- function(data,
 
   cov_table <- t(rbind(prognosis = prognosis[covariates], dim_ests))
 
+  # balance R-squared -------------------------------------------------------
+
+  bal_formula <- as.formula(paste0(treatment, "~", paste(covariates, collapse = "+")))
+  bal_rsqr <- summary(lm(bal_formula, data = data))$r.squared
+
   # output ------------------------------------------------------------------
 
   #pwdelta estimates
@@ -164,7 +169,9 @@ pwtest <- function(data,
       fit_metrics = rbind(
         pwtest_lm$fit_metrics,
         cbind(model = class(model_spec)[1], fit_metrics)
-      )
+      ),
+      prog_rsqr = pwtest_lm$fit_metrics %>% filter(.metric == "rsq") %>% pull(.estimate),
+      bal_rsqr = bal_rsqr
     )
 
   } else {
@@ -172,7 +179,9 @@ pwtest <- function(data,
       estimates = est_data,
       cov_table = cov_table,
       fit_obj = list(fit_Yc),
-      fit_metrics = cbind(model = class(model_spec)[1], fit_metrics)
+      fit_metrics = cbind(model = class(model_spec)[1], fit_metrics),
+      prog_rsqr = fit_metrics %>% filter(.metric == "rsq") %>% pull(.estimate),
+      bal_rsqr = bal_rsqr
     )
   }
 
