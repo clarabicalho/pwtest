@@ -28,36 +28,31 @@ pwtest <- function(data,
   # default regression model
   if(is.null(formula)) formula <- as.formula(paste0(outcome, "~."))
 
+  # define model engine
+  if(!is.null(engine)) model_spec <- model_spec %>% set_engine(engine)
+
   # restrict data to variables of interest
   data <- data[,c(treatment, covariates, outcome)]
 
   # observed statistics-------------------------------------
 
-  # standardize data relative to entire study group (the finite population)
+  # standardize data relative to entire study group (finite population)
   data <- data %>%
     mutate_at(.vars = c(outcome, covariates),
               .funs = scale) %>% as.data.frame()
-
-  # define model engine
-  if(!is.null(engine)) model_spec <- model_spec %>% set_engine(engine)
 
   treat_i <- which(data[[treatment]] == 1)
   control_i <- which(data[[treatment]] == 0)
 
   # data to fit Yc(0)
   datc <- data[control_i, c(outcome, covariates)]
-
   # data to predict Yt(0)
   datt <- data[treat_i, c(outcome, covariates)]
-
   fit_Yc <- model_spec %>% fit(formula = formula, data = datc)
-
   # extract standard metrics
   fit_metrics <- predict(fit_Yc, datc) %>%
     bind_cols(Y = as.vector(datc$Y)) %>% metrics(Y, .pred)
-
   predict_Yt <-  predict(fit_Yc, datt)
-
   # observed \overline{\widehat{Y^T(0)}} - \overline{Y^C(0)}
   pwdelta_obs <-  mean(predict_Yt$.pred) - mean(datc$Y)
 
@@ -180,8 +175,8 @@ pwtest <- function(data,
       cov_table = cov_table,
       fit_obj = list(fit_Yc),
       fit_metrics = cbind(model = class(model_spec)[1], fit_metrics),
-      prog_rsqr = fit_metrics %>% filter(.metric == "rsq") %>% pull(.estimate),
-      bal_rsqr = bal_rsqr
+      prog_Rsq = fit_metrics %>% filter(.metric == "rsq") %>% pull(.estimate),
+      bal_Rsq = bal_rsqr
     )
   }
 
