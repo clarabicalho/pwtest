@@ -16,6 +16,7 @@ RoxygenNote: 7.2.3
 Depends:
   rdrobust
 Imports:
+<<<<<<< Updated upstream
   dplyr,
   magrittr,
   tidyr,

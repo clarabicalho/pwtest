@@ -4,8 +4,6 @@
 #' @param treatment name of variable indicating (binary) treatment assigned
 #' @param outcome name of outcome variable
 #' @param n_bootstraps numeric scalar indicating number of bootstraps to use for the resampling-based p-values
-#' @param equivalence logical value. If TRUE, carry out equivalence test as described in Hartman and Hidalgo (2018). For a full description of the bootstrapping procedure, see paper.
-#' @param equiv_bounds numerical vector. If `equivalence = TRUE`, lower and upper bounds respectively of the equivalence range as a multiplier for the standard deviation of potential outcomes under control. Both values are set to 0.36 if set to `NULL` (see Hartman and Hidalgo (2018)).
 #' @param model_spec an object of class `model_spec` defining the functional form of the prediction model to fit $Y^C(0)$ on covariate matrix. See https://www.tidymodels.org/find/parsnip/#models for all available models.
 #' @param engine character. Engine type used for the model specified in `model_spec`. See https://www.tidymodels.org/find/parsnip/#models for all available engines for each model. If not defined, uses default engine defined by `model_spec` type in package `parsnip`, if available.
 #' @param formula object of class formula or character describing the model to fit `model_spec` on control sample. Defaults to regressing outcome on full set of covariates defined by `covariates`.
@@ -15,7 +13,6 @@
 #' @importFrom dplyr bind_cols select mutate_at
 #' @importFrom rlang sym
 #' @export
-
 pwtest <- function(data,
                    covariates = c("X1", "X2", "X3"),
                    treatment = "Z",
@@ -51,7 +48,7 @@ pwtest <- function(data,
   fit_Yc <- model_spec %>% fit(formula = formula, data = datc)
   # extract standard metrics
   fit_metrics <- predict(fit_Yc, datc) %>%
-    bind_cols(Y = as.vector(datc$Y)) %>% metrics(Y, .pred)
+    bind_cols(Y = as.vector(datc$Y)) %>% yardstick::metrics(Y, .pred)
   predict_Yt <-  predict(fit_Yc, datt)
   # observed \overline{\widehat{Y^T(0)}} - \overline{Y^C(0)}
   pwdelta_obs <-  mean(predict_Yt$.pred) - mean(datc$Y)
@@ -181,4 +178,83 @@ pwtest <- function(data,
   }
 
   return(estimates)
+}
+
+#' High-level wrapper for prognostic balance testing with automatic model selection
+#' @param data data.frame containing covariates, treatment assignment, and outcome variable
+#' @param method character. Either "auto" for automatic model selection via contest() or "manual" for user-specified parameters
+#' @param cv_folds integer. Number of cross-validation folds for contest() when method="auto"
+#' @param debug logical. Whether to print detailed debugging information during contest()
+#' @param ... Additional arguments passed to pwtest()
+#' @export
+prognostic_balance <- function(data,
+                               method = c("auto", "manual"),
+                               cv_folds = 3,
+                               debug = FALSE,
+                               ...) {
+
+  method <- match.arg(method)
+
+  # Extract and validate pwtest parameters
+  pwtest_args <- list(...)
+  if (!"covariates" %in% names(pwtest_args)) pwtest_args$covariates <- c("X1", "X2", "X3")
+  if (!"treatment" %in% names(pwtest_args)) pwtest_args$treatment <- "Z"
+  if (!"outcome" %in% names(pwtest_args)) pwtest_args$outcome <- "Y"
+  pwtest_args$data <- data
+
+  # Validate required variables exist
+  required_vars <- c(pwtest_args$treatment, pwtest_args$covariates, pwtest_args$outcome)
+  missing_vars <- setdiff(required_vars, names(data))
+  if (length(missing_vars) > 0) {
+    stop("Missing variables in data: ", paste(missing_vars, collapse = ", "))
+  }
+
+  if (method == "manual") {
+    ###########################################################################
+    # MANUAL MODE: Direct pwtest execution
+    ###########################################################################
+
+    return(do.call(pwtest, pwtest_args))
+
+  } else {
+    ###########################################################################
+    # AUTO MODE: Contest selection then pwtest
+    ###########################################################################
+
+    # Extract control group for contest
+    control_data <- data %>%
+      dplyr::filter(!!rlang::sym(pwtest_args$treatment) == 0) %>%
+      dplyr::select(tidyselect::all_of(c(pwtest_args$outcome, pwtest_args$covariates)))
+
+    if (nrow(control_data) == 0) {
+      stop("No control group observations found. Check treatment variable coding.")
+    }
+
+    # Run contest
+    if (debug) cat("=== Model selection diagnostics ===\n")
+    contest_results <- contest(
+      data_control = control_data,
+      covariates = pwtest_args$covariates,
+      outcome = pwtest_args$outcome,
+      cv_folds = cv_folds,
+      debug = debug
+    )
+
+    if (!debug) {
+      cat("Contest selected:", contest_results$best_model_name,
+          "(R-squared =", round(contest_results$best_cv_rsq, 4), ")\n")
+    }
+
+    # Prepare pwtest with contest winner
+    pwtest_args$model_spec <- contest_results$best_spec
+    pwtest_args$engine <- contest_results$best_engine
+    if (!is.null(contest_results$best_recipe)) {
+      pwtest_args$recipe <- contest_results$best_recipe
+    }
+
+    if (debug) cat("\n--- Running pwtest with contest winner ---\n")
+
+    # Return pwtest result directly
+    return(do.call(pwtest, pwtest_args))
+  }
 }
