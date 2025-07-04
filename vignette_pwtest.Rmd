@@ -61,8 +61,23 @@ pwtest(data, covariates = c("X1", "X2", "X1_2"), n_bootstraps = 200,
 ```{r}
 pwtest(data, covariates = c("X1", "X2", "X1_2"),
                   model_spec = linear_reg(mode = "regression", penalty = .5), #requires penalty parameter
-                  engine = "glmnet", n_bootstraps = 200)
+                  engine = "glmnet", n_bootstraps = 200, recipe = parsnip::recipe(data = data))
 ```
 
+# Test new function
+
+```{r}
+out <- pwtest(data, 
+              model_spec = rand_forest(mode = "regression"),
+              covariates = c("X1", "X2", "X1_2"),
+              n_bootstraps = 200,
+              cv_auto = TRUE, verbose = TRUE)
+
+data_control <- data[data$Z == 0, c("X1", "X2", "X1_2", "Y")]
+out <- auto_winner_pick(data_control, covariates = c("X1", "X2", "X1_2", "Y"), outcome = "Y", verbose = TRUE)
+out <- contest(data_control, covariates = c("X1", "X2", "X1_2", "Y"), outcome = "Y", verbose = TRUE)
+
+out
+```
 
 
