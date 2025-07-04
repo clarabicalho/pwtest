@@ -2,20 +2,20 @@
 % Please edit documentation in R/helpers.R
 \name{contest}
 \alias{contest}
-\title{ML model selection and cross-validation for prognosis weighting with comprehensive debugging}
+\title{ML model selection and cross-validation for prognosis weighting with option to produce comprehensive report}
 \usage{
 contest(
-  data_control,
+  data,
   covariates,
   outcome,
   cv_folds = 5,
-  debug = TRUE,
+  verbose = TRUE,
   min_penalty_exp = -6,
   max_penalty_exp = -1
 )
 }
 \arguments{
-\item{data_control}{data.frame containing control group observations}
+\item{data}{data.frame containing control group observations}
 
 \item{covariates}{character vector of covariate names}
 
@@ -23,12 +23,12 @@ contest(
 
 \item{cv_folds}{integer number of cross-validation folds (default 5, increased from 3)}
 
-\item{debug}{logical whether to print detailed debugging information}
+\item{verbose}{logical whether to print detailed contest report}
 
 \item{min_penalty_exp}{minimum penalty exponent (default -6 for more conservative start)}
 
-\item{max_penalty_exp}{maximum penalty exponent (default -1 for small datasets)}
+\item{max_penalty_exp}{maximum penalty exponent (default -1 for small data sets)}
 }
 \description{
-ML model selection and cross-validation for prognosis weighting with comprehensive debugging
+ML model selection and cross-validation for prognosis weighting with option to produce comprehensive report
 }

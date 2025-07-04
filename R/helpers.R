@@ -291,7 +291,10 @@ pw_delta_rdd <- function(data, covariates, running_var, treatment, outcome,
 
 # pwtest helpers
 
-# Generate bootstrap samples
+#' Generate bootstrap samples
+#' @param control_indices integer vector. Control-group row indices in the data.
+#' @param treatment_n integer. Number of units assigned to treatment in data.
+#' @param bootstrap_n integer. Number of bootstrap draws.
 get_bootstrap_samples <- function(control_indices, treatment_n, bootstrap_n) {
   replicate(
     bootstrap_n,
@@ -342,14 +345,14 @@ adjust_se <- function(values, nsims) {
   stats::sd(values, na.rm = TRUE) * (nsims - 1) / nsims
 }
 
-#' ML model selection and cross-validation for prognosis weighting with comprehensive debugging
-#' @param data_control data.frame containing control group observations
+#' ML model selection and cross-validation for prognosis weighting with option to produce comprehensive report
+#' @param data data.frame containing control group observations
 #' @param covariates character vector of covariate names
 #' @param outcome character name of outcome variable
 #' @param cv_folds integer number of cross-validation folds (default 5, increased from 3)
-#' @param debug logical whether to print detailed debugging information
+#' @param verbose logical whether to print detailed contest report
 #' @param min_penalty_exp minimum penalty exponent (default -6 for more conservative start)
-#' @param max_penalty_exp maximum penalty exponent (default -1 for small datasets)
+#' @param max_penalty_exp maximum penalty exponent (default -1 for small data sets)
 #' @importFrom rlang .data
 #' @importFrom tibble tibble
 #' @importFrom dplyr select mutate filter arrange desc semi_join pull
@@ -366,19 +369,17 @@ adjust_se <- function(values, nsims) {
 #' @importFrom scales log10_trans
 #' @importFrom yardstick metric_set rmse rsq
 #' @export
-contest <- function(data_control, covariates, outcome, cv_folds = 5, debug = TRUE,
+contest <- function(data, covariates, outcome, cv_folds = 5, verbose = TRUE,
                     min_penalty_exp = -6, max_penalty_exp = -1) {
 
-  if(debug) cat("=== DEBUGGING CONTEST FUNCTION ===\n")
+  if(verbose) cat("=== CONTEST FUNCTION REPORT ===\n")
 
   # Step 1: Data Diagnostics
-  analysis_data <- data_control %>%
-    dplyr::select(tidyselect::all_of(c(outcome, covariates))) %>%
-    tidyr::drop_na()
+  analysis_data <- data %>% tidyr::drop_na()
 
-  if(debug) {
+  if(verbose) {
     cat("\n-- Step 1:  Data  Diagnostics --\n")
-    cat("Original data dimensions:", nrow(data_control), "x", ncol(data_control), "\n")
+    cat("Original data dimensions:", nrow(data), "x", ncol(data), "\n")
     cat("Analysis data dimensions:", nrow(analysis_data), "x", ncol(analysis_data), "\n")
     cat("Outcome variable:", outcome, "\n")
     cat("Outcome variance:", stats::var(analysis_data[[outcome]], na.rm = TRUE), "\n")
@@ -407,7 +408,7 @@ contest <- function(data_control, covariates, outcome, cv_folds = 5, debug = TRU
   # Step 2: Cross-validation and Diagnostics
   cv_folds_obj <- rsample::vfold_cv(analysis_data, v = cv_folds, strata = NULL)
 
-  if(debug) {
+  if(verbose) {
     cat("\n-- Step 2: Cross-validation Diagnostics --\n")
     fold_sizes <- purrr::map_dbl(cv_folds_obj$splits, function(split) nrow(rsample::assessment(split)))
     fold_train_sizes <- purrr::map_dbl(cv_folds_obj$splits, function(split) nrow(rsample::analysis(split)))
@@ -449,7 +450,7 @@ contest <- function(data_control, covariates, outcome, cv_folds = 5, debug = TRU
     recipes::step_interact(terms = ~ recipes::all_predictors():recipes::all_predictors()) %>%
     recipes::step_corr(recipes::all_predictors(), threshold = 0.99)
 
-  if(debug) {
+  if(verbose) {
     cat("\n-- Step 3: Recipe Diagnostics --\n")
 
     # Test recipe preprocessing
@@ -492,7 +493,7 @@ contest <- function(data_control, covariates, outcome, cv_folds = 5, debug = TRU
   n_obs <- nrow(analysis_data)
   n_features_base <- length(covariates)
 
-  if(debug) {
+  if(verbose) {
     cat("\n-- Step 4: Lasso Tuning --\n")
     cat("Sample size:", n_obs, "\n")
     cat("Base features:", n_features_base, "\n")
@@ -504,14 +505,15 @@ contest <- function(data_control, covariates, outcome, cv_folds = 5, debug = TRU
     levels = 15
   )
 
-  if(debug) {
+  if(verbose) {
     cat("Lasso penalty range: 10^", min_penalty_exp, " to 10^", max_penalty_exp, "\n")
     cat("Penalty grid points:", nrow(lasso_grid), "\n")
     cat("Sample penalties:", paste(signif(lasso_grid$penalty[1:5], 3), collapse = ", "), "...\n")
     cat("Penalty range:", paste(signif(range(lasso_grid$penalty), 3), collapse = " to "), "\n")
   }
 
-  lasso_spec <- parsnip::linear_reg(penalty = tune::tune(), mixture = 1) %>% parsnip::set_engine("glmnet")
+  lasso_spec <- parsnip::linear_reg(penalty = tune::tune(), mixture = 1) %>%
+    parsnip::set_engine("glmnet")
 
   # Tree model grids
   rf_grid <- dials::grid_regular(
@@ -557,14 +559,14 @@ contest <- function(data_control, covariates, outcome, cv_folds = 5, debug = TRU
   robust_metrics <- yardstick::metric_set(yardstick::rmse, yardstick::rsq)
 
   # Step 6: Model Fitting
-  if(debug) {
+  if(verbose) {
     cat("\n-- Step 6: Model Fitting --\n")
     cat("Models to fit:", paste(targeted_workflows$wflow_id, collapse = ", "), "\n")
     cat("Number of workflows created:", nrow(targeted_workflows), "\n")
   }
 
   # Validate all workflows were created properly
-  if(debug) {
+  if(verbose) {
     cat("Validating workflow creation...\n")
     for(i in 1:nrow(targeted_workflows)) {
       wf_name <- targeted_workflows$wflow_id[i]
@@ -579,10 +581,10 @@ contest <- function(data_control, covariates, outcome, cv_folds = 5, debug = TRU
   }
 
   # Fitting function with detailed error capture
-  safe_fit_model <- function(wf_info, wf_name, lasso_grid, rf_grid, gbm_grid, cv_folds_obj, robust_metrics, debug) {
+  safe_fit_model <- function(wf_info, wf_name, lasso_grid, rf_grid, gbm_grid, cv_folds_obj, robust_metrics, verbose) {
     wf <- wf_info$workflow[[1]]
 
-    if(debug) cat("Fitting model:", wf_name, "\n")
+    if(verbose) cat("Fitting model:", wf_name, "\n")
 
     # Track warnings and errors
     warnings_captured <- character(0)
@@ -595,7 +597,7 @@ contest <- function(data_control, covariates, outcome, cv_folds = 5, debug = TRU
           tune::fit_resamples(wf, resamples = cv_folds_obj, metrics = robust_metrics)
         } else if (wf_name %in% c("lasso_poly", "lasso_interact", "lasso_poly_interact")) {
           # Test single penalty first
-          if(debug) {
+          if(verbose) {
             cat("  Testing single penalty value first...\n")
             test_wf <- wf %>% tune::finalize_workflow(tibble::tibble(penalty = 0.01))
             test_fit <- tryCatch({
@@ -629,7 +631,7 @@ contest <- function(data_control, covariates, outcome, cv_folds = 5, debug = TRU
         warning_msg <- w$message
         warnings_captured <<- c(warnings_captured, warning_msg)
 
-        if(debug) {
+        if(verbose) {
           if (grepl("correlation computation is required", warning_msg)) {
             cat("  WARNING: Constant predictions detected (over-regularized)\n")
           } else if (grepl("prediction from rank-deficient fit", warning_msg)) {
@@ -642,7 +644,7 @@ contest <- function(data_control, covariates, outcome, cv_folds = 5, debug = TRU
       })
     }, error = function(e) {
       errors_captured <<- c(errors_captured, e$message)
-      if(debug) cat("  ERROR:", e$message, "\n")
+      if(verbose) cat("  ERROR:", e$message, "\n")
       return(NULL)
     })
 
@@ -652,7 +654,7 @@ contest <- function(data_control, covariates, outcome, cv_folds = 5, debug = TRU
       attr(result, "errors") <- errors_captured
     }
 
-    if(debug) {
+    if(verbose) {
       if(is.null(result)) {
         cat("  FAILED:", wf_name, "\n")
       } else {
@@ -667,12 +669,12 @@ contest <- function(data_control, covariates, outcome, cv_folds = 5, debug = TRU
   results <- targeted_workflows %>%
     dplyr::mutate(
       fit_results = purrr::map2(.data$info, .data$wflow_id, ~{
-        if(debug) cat("Processing workflow:", .y, "\n")
-        safe_fit_model(.x, .y, lasso_grid, rf_grid, gbm_grid, cv_folds_obj, robust_metrics, debug)
+        if(verbose) cat("Processing workflow:", .y, "\n")
+        safe_fit_model(.x, .y, lasso_grid, rf_grid, gbm_grid, cv_folds_obj, robust_metrics, verbose)
       })
     )
 
-  if(debug) {
+  if(verbose) {
     cat("Completed fitting. Results summary:\n")
     results_summary <- results %>%
       dplyr::mutate(
@@ -683,7 +685,7 @@ contest <- function(data_control, covariates, outcome, cv_folds = 5, debug = TRU
   }
 
   # Step 7: Get results
-  if(debug) cat("\n-- Step 7: Results --\n")
+  if(verbose) cat("\n-- Step 7: Results --\n")
 
   model_performance <- results %>%
     dplyr::mutate(
@@ -713,7 +715,7 @@ contest <- function(data_control, covariates, outcome, cv_folds = 5, debug = TRU
               dplyr::pull(.data$mean)
           }
         }, error = function(e) {
-          if(debug) cat("Error extracting RMSE for model:", e$message, "\n")
+          if(verbose) cat("Error extracting RMSE for model:", e$message, "\n")
           return(Inf)
         })
       }),
@@ -737,13 +739,13 @@ contest <- function(data_control, covariates, outcome, cv_folds = 5, debug = TRU
               dplyr::pull(.data$mean)
           }
         }, error = function(e) {
-          if(debug) cat("Error extracting R-squared for model:", e$message, "\n")
+          if(verbose) cat("Error extracting R-squared for model:", e$message, "\n")
           return(0)
         })
       })
     )
 
-  if(debug) {
+  if(verbose) {
     cat("\nModel Performance Summary:\n")
     perf_summary <- model_performance %>%
       dplyr::select(.data$wflow_id, .data$best_rmse, .data$best_rsq, .data$model_warnings) %>%
@@ -762,7 +764,7 @@ contest <- function(data_control, covariates, outcome, cv_folds = 5, debug = TRU
   best_workflow <- model_performance$info[[best_model_idx]]$workflow[[1]]
   best_fit_results <- model_performance$fit_results[[best_model_idx]]
 
-  if(debug) {
+  if(verbose) {
     cat("\nBest model:", best_model_name, "\n")
     cat("Best R-squared:", round(model_performance$best_rsq[best_model_idx], 4), "\n")
     cat("Best RMSE:", round(model_performance$best_rmse[best_model_idx], 4), "\n")
@@ -775,13 +777,13 @@ contest <- function(data_control, covariates, outcome, cv_folds = 5, debug = TRU
     final_workflow <- tune::finalize_workflow(best_workflow, best_params)
     best_spec <- workflows::extract_spec_parsnip(final_workflow)
 
-    if(debug && "penalty" %in% names(best_params)) {
+    if(verbose && "penalty" %in% names(best_params)) {
       cat("Best lasso penalty:", best_params$penalty, "\n")
     }
-    if(debug && "mtry" %in% names(best_params)) {
+    if(verbose && "mtry" %in% names(best_params)) {
       cat("Best mtry:", best_params$mtry, "\n")
     }
-    if(debug && "learn_rate" %in% names(best_params)) {
+    if(verbose && "learn_rate" %in% names(best_params)) {
       cat("Best learning rate:", best_params$learn_rate, "\n")
     }
   } else {
@@ -798,7 +800,7 @@ contest <- function(data_control, covariates, outcome, cv_folds = 5, debug = TRU
     best_recipe <- tryCatch({
       workflows::extract_preprocessor(model_performance$info[[best_model_idx]]$workflow[[1]])
     }, error = function(e) {
-      if(debug) cat("Could not extract recipe, recreating...\n")
+      if(verbose) cat("Could not extract recipe, recreating...\n")
       # Recreate based on model name
       if (best_model_name %in% c("linear_poly", "lasso_poly")) {
         poly_recipe
@@ -837,8 +839,8 @@ contest <- function(data_control, covariates, outcome, cv_folds = 5, debug = TRU
     linear_cv_rmse = linear_cv_rmse,
     linear_cv_rsq = linear_cv_rsq,
 
-    # Diagnostics and debugging
-    debug_info = if(debug) {
+    # Diagnostics and report
+    verbose_info = if(verbose) {
       list(
         data_summary = list(
           n_obs = nrow(analysis_data),
