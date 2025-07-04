@@ -216,11 +216,11 @@ pwtest <- function(data,
 #' @param cv_folds integer. Number of cross-validation folds (see `?contest()`)
 #' @param verbose logical. Whether to print detailed information during contests (see `?contest()`)
 #' @export
-auto_winner_pick <- function(data,
-                             outcome,
-                             covariates,
-                             cv_folds = 3,
-                             verbose = FALSE) {
+pick_winner <- function(data,
+                        outcome,
+                        covariates,
+                        cv_folds = 3,
+                        verbose = FALSE) {
 
   ###########################################################################
   # AUTO MODE: Contest selection
