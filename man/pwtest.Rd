@@ -36,7 +36,7 @@ pwtest(
 
 \item{cv_auto}{logical Whether to perform automatic cross-validation and run test on contest winner. If \code{TRUE}, \code{model_spec} and \code{engine} will be overwritten by contest winner.}
 
-\item{...}{additional cross-validation arguments when \code{cv_auto = TRUE}. See \code{?auto_winner_pick}.}
+\item{...}{additional cross-validation arguments when \code{cv_auto = TRUE}. See \code{?pick_winner}.}
 }
 \description{
 Produces unweighted and prognosis-weighted test statistics with standard errors and p-values

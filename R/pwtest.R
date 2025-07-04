@@ -8,7 +8,7 @@
 #' @param engine character. Engine type used for the model specified in `model_spec`. See https://www.tidymodels.org/find/parsnip/#models for all available engines for each model. If not defined, uses default engine defined by `model_spec` type in package `parsnip`, if available.
 #' @param formula object of class formula or character describing the model to fit `model_spec` on control sample. Defaults to regressing outcome on full set of covariates defined by `covariates`.
 #' @param cv_auto logical Whether to perform automatic cross-validation and run test on contest winner. If `TRUE`, `model_spec` and `engine` will be overwritten by contest winner.
-#' @param ... additional cross-validation arguments when `cv_auto = TRUE`. See `?auto_winner_pick`.
+#' @param ... additional cross-validation arguments when `cv_auto = TRUE`. See `?pick_winner`.
 #' @importFrom parsnip linear_reg fit set_engine
 #' @importFrom yardstick metrics
 #' @importFrom stats predict sd setNames as.formula t.test
@@ -67,11 +67,11 @@ pwtest <- function(data,
   # run cross validation (cv_auto = TRUE) -------------------
   if(cv_auto){
     # pass on arguments from parent function
-    argg_contest <- c(argg[names(argg) %in% names(formals(auto_winner_pick))])
+    argg_contest <- c(argg[names(argg) %in% names(formals(pick_winner))])
     argg_contest$data <- control_data
 
     # pick winner and output model specs
-    winner <- do.call(auto_winner_pick, argg_contest)
+    winner <- do.call(pick_winner, argg_contest)
     argg$model_spec <- winner$model_spec
     argg$engine <- winner$engine
     # argg$recipe <- winner$recipe
