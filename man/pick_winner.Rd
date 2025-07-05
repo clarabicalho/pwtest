@@ -4,7 +4,15 @@
 \alias{pick_winner}
 \title{High-level wrapper for prognostic balance testing with automatic model selection}
 \usage{
-pick_winner(data, outcome, covariates, cv_folds = 3, verbose = FALSE)
+pick_winner(
+  data,
+  outcome,
+  covariates,
+  cv_folds = 5,
+  min_penalty_exp = -1,
+  max_penalty_exp = 6,
+  verbose = FALSE
+)
 }
 \arguments{
 \item{data}{data.frame containing covariates and outcome variable and subset to control group units}
@@ -14,6 +22,10 @@ pick_winner(data, outcome, covariates, cv_folds = 3, verbose = FALSE)
 \item{covariates}{character vector of names of placebo variables}
 
 \item{cv_folds}{integer. Number of cross-validation folds (see \code{?contest()})}
+
+\item{min_penalty_exp}{minimum penalty exponent (default -6 for more conservative start)}
+
+\item{max_penalty_exp}{maximum penalty exponent (default -1 for small data sets)}
 
 \item{verbose}{logical. Whether to print detailed information during contests (see \code{?contest()})}
 }

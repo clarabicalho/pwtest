@@ -2,7 +2,7 @@
 % Please edit documentation in R/helpers.R
 \name{contest}
 \alias{contest}
-\title{ML model selection and cross-validation for prognosis weighting with option to produce comprehensive report}
+\title{ML model selection and cross-validation for fitting prognostic-weighted difference in average potential outcomes under control with option to produce comprehensive report}
 \usage{
 contest(
   data,
@@ -21,14 +21,14 @@ contest(
 
 \item{outcome}{character name of outcome variable}
 
-\item{cv_folds}{integer number of cross-validation folds (default 5, increased from 3)}
+\item{cv_folds}{integer. Number of cross-validation folds (default 5, increased from 3)}
 
-\item{verbose}{logical whether to print detailed contest report}
+\item{verbose}{logical. Whether to print detailed contest report}
 
 \item{min_penalty_exp}{minimum penalty exponent (default -6 for more conservative start)}
 
 \item{max_penalty_exp}{maximum penalty exponent (default -1 for small data sets)}
 }
 \description{
-ML model selection and cross-validation for prognosis weighting with option to produce comprehensive report
+ML model selection and cross-validation for fitting prognostic-weighted difference in average potential outcomes under control with option to produce comprehensive report
 }

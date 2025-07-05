@@ -345,12 +345,12 @@ adjust_se <- function(values, nsims) {
   stats::sd(values, na.rm = TRUE) * (nsims - 1) / nsims
 }
 
-#' ML model selection and cross-validation for prognosis weighting with option to produce comprehensive report
+#' ML model selection and cross-validation for fitting prognostic-weighted difference in average potential outcomes under control with option to produce comprehensive report
 #' @param data data.frame containing control group observations
 #' @param covariates character vector of covariate names
 #' @param outcome character name of outcome variable
-#' @param cv_folds integer number of cross-validation folds (default 5, increased from 3)
-#' @param verbose logical whether to print detailed contest report
+#' @param cv_folds integer. Number of cross-validation folds (default 5, increased from 3)
+#' @param verbose logical. Whether to print detailed contest report
 #' @param min_penalty_exp minimum penalty exponent (default -6 for more conservative start)
 #' @param max_penalty_exp maximum penalty exponent (default -1 for small data sets)
 #' @importFrom rlang .data

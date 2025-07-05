@@ -26,6 +26,29 @@ pwtest <- function(data,
                    cv_auto = FALSE,
                    ...) {
 
+  if(cv_auto & !is.null(model_spec)) {
+    warning("Argument `model_spec` will be overwritten by contest winner since `cv_auto = TRUE`. If you want to use a specific model, set `cv_auto = FALSE`.")
+  }
+  if(!cv_auto & (is.null(model_spec) | all(class(model_spec) != "model_spec"))) {
+    stop("Argument `model_spec` must be an object of class `model_spec` from package `parsnip`. See https://www.tidymodels.org/find/parsnip/#models for more details.")
+  }
+  if(!is.null(formula)){
+    if(is.character(formula)) formula <- as.formula(formula)
+    else{
+      stop("Argument `formula` must be either of class character of formula.")
+    }
+  }
+  if(any(!is.character(outcome), !is.character(treatment), !is.character(covariates))){
+    stop("Missing outcome, treatment, or covariates. All arguments must be character vectors of variable names.")
+  }
+
+  # Validate required variables exist -----------------------
+  required_vars <- c(treatment, covariates, outcome)
+  missing_vars <- setdiff(required_vars, names(data))
+  if (length(missing_vars) > 0) {
+    stop("Missing variables in data: ", paste(missing_vars, collapse = ", "))
+  }
+
   # extract arguments (default and user-supplied) from parent function
   argg <- as.list(match.call())[-1]
   arg_formals <- formals(pwtest) ## formals with default arguments
@@ -44,20 +67,8 @@ pwtest <- function(data,
   # restrict data to variables of interest
   data <- data[,c(treatment, covariates, outcome)]
 
-  # standardize data relative to entire study group (finite population)
-  data <- data %>%
-    mutate_at(.vars = c(outcome, covariates),
-              .funs = scale) %>% as.data.frame()
-
   treat_i <- which(data[[treatment]] == 1)
   control_i <- which(data[[treatment]] == 0)
-
-  # Validate required variables exist -----------------------
-  required_vars <- c(treatment, covariates, outcome)
-  missing_vars <- setdiff(required_vars, names(data))
-  if (length(missing_vars) > 0) {
-    stop("Missing variables in data: ", paste(missing_vars, collapse = ", "))
-  }
 
   control_data <- data[control_i, c(outcome, covariates)]
   if (nrow(control_data) == 0) {
@@ -72,12 +83,17 @@ pwtest <- function(data,
 
     # pick winner and output model specs
     winner <- do.call(pick_winner, argg_contest)
-    argg$model_spec <- winner$model_spec
-    argg$engine <- winner$engine
+    model_spec <- winner$model_spec
+    engine <- winner$engine
     # argg$recipe <- winner$recipe
   }
 
   # observed statistics -------------------------------------
+
+  # standardize data relative to entire study group (finite population)
+  data <- data %>%
+    mutate_at(.vars = c(outcome, covariates),
+              .funs = scale) %>% as.data.frame()
 
   # data to fit Yc(0)
   datc <- data[control_i, c(outcome, covariates)]
@@ -214,12 +230,16 @@ pwtest <- function(data,
 #' @param covariates character vector of names of placebo variables
 #' @param outcome name of outcome variable
 #' @param cv_folds integer. Number of cross-validation folds (see `?contest()`)
+#' @param min_penalty_exp minimum penalty exponent (default -6 for more conservative start)
+#' @param max_penalty_exp maximum penalty exponent (default -1 for small data sets)
 #' @param verbose logical. Whether to print detailed information during contests (see `?contest()`)
 #' @export
 pick_winner <- function(data,
                         outcome,
                         covariates,
-                        cv_folds = 3,
+                        cv_folds = 5,
+                        min_penalty_exp = -1,
+                        max_penalty_exp = 6,
                         verbose = FALSE) {
 
   ###########################################################################
