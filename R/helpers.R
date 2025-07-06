@@ -200,16 +200,11 @@ pw_delta_rdd <- function(data, covariates, running_var, treatment, outcome,
   # standardize data relative to entire study group (the finite population)
   # uses same standardization procedure for data as in non-RD case
   # REVIEW: does not standardize running variable
-  if(standardize){
-    if(simulation & length(unique(data[[outcome]]))==1L){
-      data <- data %>%
-        dplyr::mutate_at(.vars = c(covariates),
-                         .funs = stdr) %>% as.data.frame()
-    } else {
-      data <- data %>%
-        dplyr::mutate_at(.vars = c(outcome, covariates),
-                         .funs = stdr) %>% as.data.frame()
-    }
+
+  if(length(unique(data[[outcome]]))==1L){
+    data <- data %>%
+      dplyr::mutate_at(.vars = c(covariates),
+                       .funs = stdr) %>% as.data.frame()
   }
 
   # fitted values of Y0 with prognosis weights
@@ -256,7 +251,8 @@ pw_delta_rdd <- function(data, covariates, running_var, treatment, outcome,
     argg[[rd_estimator]] <- unname(rd_out$bws[rd_estimator,])
   }
 
-  # Note: calculates the difference in intercepts for covariates using the same bandwidth set by user or defaulted in rdrobust() with the fitted Y0hat.
+  # Difference in intercepts for covariates uses the same bandwidth set by user
+  # or defaulted in rdrobust() with the fitted Y0hat.
   # All other values are rdrobust defaults if not set by user.
   dii_covs <- sapply(covariates, function(covariate){
     argg_cov <- argg
@@ -283,9 +279,7 @@ pw_delta_rdd <- function(data, covariates, running_var, treatment, outcome,
               pw = pw_bw,
               pwdelta = pwdelta,
               pwdelta_se = rd_out$se,
-              rdrobust_output = rd_out,
-              prog_Rsq = prog_Rsq,
-              bal_Rsq = bal_Rsq))
+              rdrobust_output = rd_out))
 
 }
 
