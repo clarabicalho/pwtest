@@ -179,6 +179,7 @@ pw_delta <- function(data, covariates, treatment, outcome, standardize = TRUE,
 #' @param simulation logical. Whether running the function on bootstrap sample
 #' @param rd_estimator character. Whether to use the conventional ("h") or the bias-corrected local-polynomial point estimator ("b"). See `rdrobust()` for more details. Defaults to conventional estimate ("h").
 #' @param ... arguments passed on to `rdrobust` function. If `rdrobust()` arguments `y` and `covs` are not specified, they will take the values of the variables defined by `outcome` and `covariates`, respectively. All other arguments, if not specified, will take the default values in `rdrobust()`
+#' @import rdrobust
 
 pw_delta_rdd <- function(data, covariates, running_var, treatment, outcome,
                          standardize = TRUE, simulation = FALSE,
@@ -216,10 +217,10 @@ pw_delta_rdd <- function(data, covariates, running_var, treatment, outcome,
   if(!"x" %in% names(argg)) argg$x <- data[[running_var]]
 
   # rdrobust() inherits arguments from pwtest()
-  rd_argg <- intersect(names(argg), names(formals(rdrobust::rdrobust)))
+  rd_argg <- intersect(names(argg), names(formals(rdrobust)))
   # REVIEW: rdrobust does not take variables in `covariates` for the argument `covs`
   # unless `covs` is specified (separately)
-  rd_out <- do.call("rdrobust::rdrobust", args = argg[rd_argg])
+  rd_out <- do.call("rdrobust", args = argg[rd_argg])
 
   # use the rdrobust output to extract bandwidth and
   # recalculate weights within the bandwidth
@@ -236,10 +237,10 @@ pw_delta_rdd <- function(data, covariates, running_var, treatment, outcome,
   # (estimated coefs from control group regression of Y0 on covariates)
   Y0hat <- as.matrix(data[,covariates])%*%as.matrix(pw_bw, nrow = length(pw_bw))
   argg$y <- Y0hat # overwrite outcome with within-bw prognostic weights
-  rd_argg <- intersect(names(argg), names(formals(rdrobust::rdrobust)))
+  rd_argg <- intersect(names(argg), names(formals(rdrobust)))
 
   # run dii estimation on reweighted (within-bandwidth) fitted Y0hat
-  rd_out <- do.call("rdrobust::rdrobust", args = argg[rd_argg])
+  rd_out <- do.call("rdrobust", args = argg[rd_argg])
 
   # pw delta as difference in intercepts for Y0hat
   if(rd_estimator == "h") pwdelta <- unname(rd_out$Estimate[,"tau.us"])
@@ -257,8 +258,8 @@ pw_delta_rdd <- function(data, covariates, running_var, treatment, outcome,
   dii_covs <- sapply(covariates, function(covariate){
     argg_cov <- argg
     argg_cov$y <- data[[covariate]]
-    argg_new <- intersect(names(argg), names(formals(rdrobust::rdrobust)))
-    rd <- do.call("rdrobust::rdrobust", args = argg_cov[argg_new])
+    argg_new <- intersect(names(argg), names(formals(rdrobust)))
+    rd <- do.call("rdrobust", args = argg_cov[argg_new])
     if(rd_estimator == "h") uwd <- unname(rd$Estimate[,"tau.us"])
     if(rd_estimator == "b") uwd <- unname(rd$Estimate[,"tau.bc"])
     return(uwd)

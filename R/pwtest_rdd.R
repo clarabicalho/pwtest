@@ -9,7 +9,7 @@
 #' @param rd_estimator character. Whether to use the conventional ("h") or the bias-corrected local-polynomial point estimator ("b"). See `rdrobust()` for more details. Defaults to conventional estimate ("h").
 #' @param return_uwtest logical. Whether to return results from unweighted test as well.
 #' @param ... arguments passed onto `rdrobust()` function
-#' @import rdrobust
+#' @import rdrobust rdrobust
 #' @importFrom stats pnorm
 #' @export
 
