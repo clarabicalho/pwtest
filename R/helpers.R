@@ -7,6 +7,30 @@ stdr <- function(x){
   (x - mean(x, na.rm = TRUE))/(stats::sd(x, na.rm = TRUE)*(length(x)-1)/length(x))
 }
 
+capture_warnings_apply <- function(X, MARGIN, FUN, ...) {
+  warnings <- character()  # store warning messages
+
+  # wrapper around FUN to collect warnings
+  wrapper <- function(...) {
+    withCallingHandlers(
+      FUN(...),
+      warning = function(w) {
+        warnings <<- c(warnings, conditionMessage(w))
+        invokeRestart("muffleWarning")  # suppress immediate printing
+      }
+    )
+  }
+
+  result <- apply(X, MARGIN, wrapper, ...)
+
+  unique_warnings <- unique(warnings)
+  if (length(unique_warnings) > 0) {
+    warning(paste(unique_warnings, collapse = "\n"))
+  }
+
+  result
+}
+
 #'Calculates prognosis weights from observed control-group sample
 #' @param data data.frame containing covariates, treatment assignment, and outcome variable
 #' @param covariates character vector of covariate names
@@ -19,31 +43,19 @@ stdr <- function(x){
 #' @importFrom tidyselect all_of
 #' @importFrom dplyr mutate_at filter
 #' @importFrom stats coef var lm
-pw <- function(data, covariates, treatment, outcome, standardize, simulation){
+pw <- function(data, covariates, treatment, outcome){
 
   # listwise deletion of observations with missing values
   data_pw <- data %>% tidyr::drop_na(tidyselect::all_of(c(outcome, covariates, treatment)))
   z0 <- data_pw[[treatment]] == 0
 
   # standardize control data for prognosis regression
-  if(standardize){
-    if(simulation & length(unique(data[[outcome]]))==1L){
-      # standardize -covariates only- in simulation runs with fixed POs
-      data_c <- data_pw %>% dplyr::filter(z0) %>%
-        dplyr::mutate_at(.vars = c(covariates),
-                         .funs = stdr) %>% as.data.frame()
-    } else {
-      data_c <- data_pw %>% dplyr::filter(z0) %>%
-        dplyr::mutate_at(.vars = c(outcome, covariates),
-                         .funs = stdr) %>% as.data.frame()
-    }
-
-  } else {
-    data_c <- data_pw %>% dplyr::filter(z0)
-  }
+  # data_c <- data_pw %>% dplyr::filter(z0) %>%
+  #   dplyr::mutate_at(.vars = c(outcome, covariates),
+  #                    .funs = stdr) %>% as.data.frame()
 
   # check if variance = 0 and return error
-  temp_data <- data_c %>%
+  temp_data <- data_pw %>%
     dplyr::select(tidyselect::all_of(c(covariates, outcome)))
   check_var <- apply(temp_data, 2, stats::var, na.rm = TRUE)
   var_na <- names(check_var[is.na(check_var)])
@@ -51,8 +63,8 @@ pw <- function(data, covariates, treatment, outcome, standardize, simulation){
                                      paste0(var_na, collapse = ", "),
                                      ". Consider an alternative, for example, excluding the covariate(s)."))
   # calculate prognosis weights
-  X <- as.matrix(data_c[,covariates], ncol = length(covariates))
-  Y <- as.matrix(data_c[,outcome], ncol = 1)
+  X <- as.matrix(data_pw[,covariates], ncol = length(covariates))
+  Y <- as.matrix(data_pw[,outcome], ncol = 1)
   pw <- stats::coef(stats::lm(Y ~ X-1))
 
   names(pw) <- covariates
@@ -144,7 +156,7 @@ uw_delta <- function(data, covariates, treatment, outcome, standardize = TRUE, s
 pw_delta <- function(data, covariates, treatment, outcome, standardize = TRUE,
                      DIM, simulation = FALSE){
 
-  pweights <- pw(data, covariates, treatment, outcome, standardize, simulation)
+  pweights <- pw(data, covariates, treatment, outcome)
   pwdelta_j <- pweights*DIM
   # names(pwdelta_j) <- paste0("pw_", covariates)
 
@@ -182,7 +194,6 @@ pw_delta <- function(data, covariates, treatment, outcome, standardize = TRUE,
 #' @import rdrobust
 
 pw_delta_rdd <- function(data, covariates, running_var, treatment, outcome,
-                         standardize = TRUE, simulation = FALSE,
                          rd_estimator = "h", ...){
 
   argg <- as.list(match.call())
@@ -194,13 +205,11 @@ pw_delta_rdd <- function(data, covariates, running_var, treatment, outcome,
 
   # obtain prognostic weights/coefficients for each covariate calculated for
   # all control units in the full data
-  pw_full <- pw(data = data, covariates = covariates, treatment = treatment,
-                outcome = outcome, standardize = standardize, simulation = simulation)
+  pw_full <- pw(data = data, covariates = covariates, treatment = treatment, outcome = outcome)
 
-  # if(any(is.na(pw_full))) stop()
-  # standardize data relative to entire study group (the finite population)
-  # uses same standardization procedure for data as in non-RD case
-  # REVIEW: does not standardize running variable
+  if(any(is.na(pw_full))) stop("Prognosis weights cannot be calculated for the following covariates: ",
+                                  paste0(names(pw_full)[is.na(pw_full)], collapse = ", "),
+                                  ". Consider removing these covariates or using a different method to calculate prognosis weights.")
 
   if(length(unique(data[[outcome]]))==1L){
     data <- data %>%
@@ -230,8 +239,7 @@ pw_delta_rdd <- function(data, covariates, running_var, treatment, outcome,
 
   data_bw <- subset(data, data[[running_var]] >= cutoff - argg$h & data[[running_var]] <= cutoff + argg$h)
 
-  pw_bw <- pw(data = data_bw, covariates = covariates, treatment = treatment,
-              outcome = outcome, standardize = standardize, simulation = simulation)
+  pw_bw <- pw(data = data_bw, covariates = covariates, treatment = treatment, outcome = outcome)
 
   # fitted values of Y0 with prognosis weights within the bandwidth
   # (estimated coefs from control group regression of Y0 on covariates)

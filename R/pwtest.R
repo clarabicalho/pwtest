@@ -13,7 +13,7 @@
 #' @importFrom yardstick metrics
 #' @importFrom stats predict sd setNames as.formula t.test
 #' @importFrom dplyr bind_cols select mutate_at
-#' @importFrom rlang sym
+#' @importFrom rlang sym :=
 #' @export
 pwtest <- function(data,
                    covariates = c("X1", "X2", "X3"),
@@ -102,10 +102,11 @@ pwtest <- function(data,
   fit_Yc <- model_spec %>% fit(formula = formula, data = datc)
   # extract standard metrics
   fit_metrics <- predict(fit_Yc, datc) %>%
-    bind_cols(Y = as.vector(datc$Y)) %>% yardstick::metrics(Y, .pred)
+    bind_cols(!!outcome := as.vector(datc[[outcome]])) %>%
+    yardstick::metrics(outcome, .pred)
   predict_Yt <-  predict(fit_Yc, datt)
   # observed \overline{\widehat{Y^T(0)}} - \overline{Y^C(0)}
-  pwdelta_obs <-  mean(predict_Yt$.pred) - mean(datc$Y)
+  pwdelta_obs <-  mean(predict_Yt$.pred, na.rm = TRUE) - mean(datc[[outcome]], , na.rm = TRUE)
 
   # bootstrapping -------------------------------------
 
@@ -116,16 +117,20 @@ pwtest <- function(data,
   data_stdc <- std_data(data, c(outcome, covariates), treatment)
 
   # obtain delta distribution from bootstrap samples
-  bstats <- apply(samples, 2, function(z) {
+  pwdelta_from_draw <- function(z) {
+
     bsample <- data_stdc[z, ]
     bsample[[treatment]][1:length(treat_i)] <- 1
 
     predict_Yc <- predict(fit_Yc, bsample[bsample[[treatment]] == 0, ])
     predict_Yt <-  predict(fit_Yc, bsample[bsample[[treatment]] == 1, ])
-    dY <- mean(predict_Yt$.pred) - mean(predict_Yc$.pred)
+    dY <- mean(predict_Yt$.pred, na.rm = TRUE) -
+      mean(predict_Yc$.pred, na.rm = TRUE)
 
     return(list(pwdelta=dY))
-  })
+  }
+
+  bstats <- capture_warnings_apply(samples, 2, pwdelta_from_draw)
 
   # check for completeness and draw additional bootstrap samples if necessary
   nc_bootstraps <- sum(!is.na(sapply(bstats, function(x) x$pwdelta)))
@@ -134,16 +139,7 @@ pwtest <- function(data,
     add_samples <- get_bootstrap_samples(control_i, length(treat_i), n_bootstraps-nc_bootstraps)
 
     # obtain delta distribution from bootstrap samples
-    add_bstats <- apply(add_samples, 2, function(z) {
-      bsample <- data_stdc[z, ]
-      bsample[[treatment]][1:length(treat_i)] <- 1
-
-      predict_Yc <- predict(fit_Yc, bsample[bsample[[treatment]] == 0, ])
-      predict_Yt <-  predict(fit_Yc, bsample[bsample[[treatment]] == 1, ])
-      dY <- mean(predict_Yt$.pred) - mean(predict_Yc$.pred)
-
-      return(list(pwdelta=dY))
-    })
+    add_bstats <- capture_warnings_apply(add_samples, 2, pwdelta_from_draw)
 
     bstats <- c(bstats, add_bstats)
     nc_bootstraps <- sum(!is.na(sapply(bstats, function(x) x$pwdelta)))
@@ -174,6 +170,10 @@ pwtest <- function(data,
   # prognosis ---------------------------------------------------------------
   if(is.null(pwtest_lm)) prognosis <- coef(fit_Yc$fit)
   else prognosis <- coef(pwtest_lm$fit_obj[[1]]$fit)
+
+  if(any(is.na(prognosis))) warning(paste0("Covariate(s) ",
+                                    paste(names(prognosis)[is.na(prognosis)], collapse = ", "),
+                                    " have missing prognosis coefficients and receive weight of 0 in the prognosis-weighted test statistic."))
 
   cov_table <- t(rbind(prognosis = prognosis[covariates], dim_ests))
 

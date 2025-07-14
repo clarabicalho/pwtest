@@ -10,6 +10,7 @@
 #' @param return_uwtest logical. Whether to return results from unweighted test as well.
 #' @param ... arguments passed onto `rdrobust()` function
 #' @import rdrobust rdrobust
+#' @importFrom utils modifyList
 #' @importFrom stats pnorm
 #' @export
 
@@ -27,13 +28,14 @@ pwtest_rdd <- function(data,
   # REVIEW write warning if specifying differing values for y and outcome, x and treatment
   # write message if set se_type = 'analytic' and rdd = TRUE
 
-  if (is.null(running_var)) stop("When using 'rdd = TRUE', need to specify 'running_var'.")
+  if (is.null(running_var)) stop("Need to specify 'running_var'.")
   if ((length(se_type) != 1L | !se_type %in% c("bootstrap", "conventional", "bias-corrected", "robust"))) {
     stop("`se_type` must take be set to either 'bootstrap', 'conventional', 'bias-corrected', 'robust'.")
   }
 
   # restrict data to variables of interest
-  data <- data[,c(treatment, covariates, outcome, running_var)]
+  data <- data[,c(treatment, covariates, outcome, running_var)] %>%
+    tidyr::drop_na()
 
   # standardize data relative to entire study group (finite population)
   data <- data %>%
@@ -58,7 +60,7 @@ pwtest_rdd <- function(data,
   coef_na <- is.na(pwdelta_obs$pw)
   if (any(coef_na)) {
     vars <- names(which(coef_na))
-    warning(paste0("The following variables return missing coefficients in regression Y[Z=0] ~ X[Z=0]: ", vars, ". Consider omitting those variables for pwdelta."))
+    warning(paste0("The following variables return missing coefficients in regression Y[Z=0] ~ X[Z=0]: ", vars, ". Consider diagnosing or omitting those variables from the test."))
   }
 
   # bootstrapping -------------------------------------
@@ -68,9 +70,12 @@ pwtest_rdd <- function(data,
   control_i <- which(data[[treatment]] == 0)
   samples <- get_bootstrap_samples(control_i, length(treat_i), n_bootstraps)
 
+  # standardize bootstrap population relative to control group SD
+  data_stdc <- std_data(data, c(outcome, covariates), treatment)
+
   # obtain delta distribution from bootstrap samples
-  bstats <- apply(samples, 2, function(z) {
-    bsample <- data[z, ]
+  pwdelta_from_draw <- function(z) {
+    bsample <- data_stdc[z, ]
     # change treatment condition from control to treatment for bootstrap treatment group
     bsample[[treatment]][1:length(treat_i)] <- 1
 
@@ -79,19 +84,12 @@ pwtest_rdd <- function(data,
     bsample[bs_t, running_var] <- -(bsample[bs_t, running_var])
     # cutoff takes default value as in rdrobust() if not specified by user
     cutoff <- ifelse("c" %in% names(argg), argg$c, 0)
-    pwbstats <- tryCatch(
-      expr = {
-        do.call("pw_delta_rdd", args = modifyList(argg, list(data = bsample)))
-      },
-      error = function(e) {
-        out <- vector(mode = "list", length = length(pwdelta_obs))
-        names(out) <- names(pwdelta_obs)
-        return(out)
-      }
-    )
+    pwbstats <- do.call("pw_delta_rdd", args = modifyList(argg, list(data = bsample)))
 
     return(c(pwbstats))
-  })
+  }
+
+  bstats <- capture_warnings_apply(samples, 2, pwdelta_from_draw)
 
   # bootstrap sample checks ----------------------------------
 
