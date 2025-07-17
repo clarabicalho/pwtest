@@ -20,8 +20,16 @@ Imports:
   magrittr,
   tidyr,
   tidyselect,
-  tidymodels,
   stats,
   rlang,
   parsnip,
-  yardstick
+  yardstick,
+  dials,
+  ggplot2,
+  purrr,
+  recipes,
+  rsample,
+  scales,
+  tibble,
+  tune,
+  workflows

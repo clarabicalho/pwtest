@@ -12,7 +12,9 @@ pwtest(
   n_bootstraps = 500,
   model_spec = linear_reg(mode = "regression", engine = "lm"),
   engine = NULL,
-  formula = NULL
+  formula = NULL,
+  cv_auto = FALSE,
+  ...
 )
 }
 \arguments{
@@ -32,9 +34,9 @@ pwtest(
 
 \item{formula}{object of class formula or character describing the model to fit \code{model_spec} on control sample. Defaults to regressing outcome on full set of covariates defined by \code{covariates}.}
 
-\item{equivalence}{logical value. If TRUE, carry out equivalence test as described in Hartman and Hidalgo (2018). For a full description of the bootstrapping procedure, see paper.}
+\item{cv_auto}{logical Whether to perform automatic cross-validation and run test on contest winner. If \code{TRUE}, \code{model_spec} and \code{engine} will be overwritten by contest winner.}
 
-\item{equiv_bounds}{numerical vector. If \code{equivalence = TRUE}, lower and upper bounds respectively of the equivalence range as a multiplier for the standard deviation of potential outcomes under control. Both values are set to 0.36 if set to \code{NULL} (see Hartman and Hidalgo (2018)).}
+\item{...}{additional cross-validation arguments when \code{cv_auto = TRUE}. See \code{?pick_winner}.}
 }
 \description{
 Produces unweighted and prognosis-weighted test statistics with standard errors and p-values

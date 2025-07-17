@@ -4,18 +4,17 @@
 #' @param treatment name of variable indicating (binary) treatment assigned
 #' @param outcome name of outcome variable
 #' @param n_bootstraps numeric scalar indicating number of bootstraps to use for the resampling-based p-values
-#' @param equivalence logical value. If TRUE, carry out equivalence test as described in Hartman and Hidalgo (2018). For a full description of the bootstrapping procedure, see paper.
-#' @param equiv_bounds numerical vector. If `equivalence = TRUE`, lower and upper bounds respectively of the equivalence range as a multiplier for the standard deviation of potential outcomes under control. Both values are set to 0.36 if set to `NULL` (see Hartman and Hidalgo (2018)).
 #' @param model_spec an object of class `model_spec` defining the functional form of the prediction model to fit $Y^C(0)$ on covariate matrix. See https://www.tidymodels.org/find/parsnip/#models for all available models.
 #' @param engine character. Engine type used for the model specified in `model_spec`. See https://www.tidymodels.org/find/parsnip/#models for all available engines for each model. If not defined, uses default engine defined by `model_spec` type in package `parsnip`, if available.
 #' @param formula object of class formula or character describing the model to fit `model_spec` on control sample. Defaults to regressing outcome on full set of covariates defined by `covariates`.
+#' @param cv_auto logical Whether to perform automatic cross-validation and run test on contest winner. If `TRUE`, `model_spec` and `engine` will be overwritten by contest winner.
+#' @param ... additional cross-validation arguments when `cv_auto = TRUE`. See `?pick_winner`.
 #' @importFrom parsnip linear_reg fit set_engine
 #' @importFrom yardstick metrics
 #' @importFrom stats predict sd setNames as.formula t.test
 #' @importFrom dplyr bind_cols select mutate_at
 #' @importFrom rlang sym
 #' @export
-
 pwtest <- function(data,
                    covariates = c("X1", "X2", "X3"),
                    treatment = "Z",
@@ -23,7 +22,41 @@ pwtest <- function(data,
                    n_bootstraps = 500, # in models other than lm, the bootstrap sample also defines the training sample
                    model_spec = linear_reg(mode = "regression", engine = "lm"),
                    engine = NULL,
-                   formula = NULL) {
+                   formula = NULL,
+                   cv_auto = FALSE,
+                   ...) {
+
+  if(cv_auto & !is.null(model_spec)) {
+    warning("Argument `model_spec` will be overwritten by contest winner since `cv_auto = TRUE`. If you want to use a specific model, set `cv_auto = FALSE`.")
+  }
+  if(!cv_auto & (is.null(model_spec) | all(class(model_spec) != "model_spec"))) {
+    stop("Argument `model_spec` must be an object of class `model_spec` from package `parsnip`. See https://www.tidymodels.org/find/parsnip/#models for more details.")
+  }
+  if(!is.null(formula)){
+    if(is.character(formula)) formula <- as.formula(formula)
+    else{
+      stop("Argument `formula` must be either of class character of formula.")
+    }
+  }
+  if(any(!is.character(outcome), !is.character(treatment), !is.character(covariates))){
+    stop("Missing outcome, treatment, or covariates. All arguments must be character vectors of variable names.")
+  }
+
+  # Validate required variables exist -----------------------
+  required_vars <- c(treatment, covariates, outcome)
+  missing_vars <- setdiff(required_vars, names(data))
+  if (length(missing_vars) > 0) {
+    stop("Missing variables in data: ", paste(missing_vars, collapse = ", "))
+  }
+
+  # extract arguments (default and user-supplied) from parent function
+  argg <- as.list(match.call())[-1]
+  arg_formals <- formals(pwtest) ## formals with default arguments
+  for (v in names(arg_formals)){
+    if (!(v %in% names(argg)))
+      ## if arg value is missing, add its default
+      argg <- append(argg, arg_formals[v])
+  }
 
   # default regression model
   if(is.null(formula)) formula <- as.formula(paste0(outcome, "~."))
@@ -34,15 +67,33 @@ pwtest <- function(data,
   # restrict data to variables of interest
   data <- data[,c(treatment, covariates, outcome)]
 
-  # observed statistics-------------------------------------
+  treat_i <- which(data[[treatment]] == 1)
+  control_i <- which(data[[treatment]] == 0)
+
+  control_data <- data[control_i, c(outcome, covariates)]
+  if (nrow(control_data) == 0) {
+    stop("No control group observations found. Check treatment variable coding.")
+  }
+
+  # run cross validation (cv_auto = TRUE) -------------------
+  if(cv_auto){
+    # pass on arguments from parent function
+    argg_contest <- c(argg[names(argg) %in% names(formals(pick_winner))])
+    argg_contest$data <- control_data
+
+    # pick winner and output model specs
+    winner <- do.call(pick_winner, argg_contest)
+    model_spec <- winner$model_spec
+    engine <- winner$engine
+    # argg$recipe <- winner$recipe
+  }
+
+  # observed statistics -------------------------------------
 
   # standardize data relative to entire study group (finite population)
   data <- data %>%
     mutate_at(.vars = c(outcome, covariates),
               .funs = scale) %>% as.data.frame()
-
-  treat_i <- which(data[[treatment]] == 1)
-  control_i <- which(data[[treatment]] == 0)
 
   # data to fit Yc(0)
   datc <- data[control_i, c(outcome, covariates)]
@@ -51,7 +102,7 @@ pwtest <- function(data,
   fit_Yc <- model_spec %>% fit(formula = formula, data = datc)
   # extract standard metrics
   fit_metrics <- predict(fit_Yc, datc) %>%
-    bind_cols(Y = as.vector(datc$Y)) %>% metrics(Y, .pred)
+    bind_cols(Y = as.vector(datc$Y)) %>% yardstick::metrics(Y, .pred)
   predict_Yt <-  predict(fit_Yc, datt)
   # observed \overline{\widehat{Y^T(0)}} - \overline{Y^C(0)}
   pwdelta_obs <-  mean(predict_Yt$.pred) - mean(datc$Y)
@@ -102,15 +153,6 @@ pwtest <- function(data,
   pwdelta_se <- sd(unlist(sapply(bstats, function(x) x$pwdelta)), na.rm = TRUE) * (n_bootstraps - 1) / n_bootstraps %>% unname
 
   # always estimate pwdelta from linear model unless model_spec is lm -------
-
-  # extract arguments (default and user-supplied) from parent function
-  argg <- as.list(match.call())[-1]
-  arg_formals <- formals(pwtest) ## formals with default arguments
-  for (v in names(arg_formals)){
-    if (!(v %in% names(argg)))
-      ## if arg value is missing, add its default
-      argg <- append(argg, arg_formals[v])
-  }
 
   # modify relevant arguments to fit linear regression
   if(!"linear_reg" %in% class(model_spec)){
@@ -181,4 +223,50 @@ pwtest <- function(data,
   }
 
   return(estimates)
+}
+
+#' High-level wrapper for prognostic balance testing with automatic model selection
+#' @param data data.frame containing covariates and outcome variable and subset to control group units
+#' @param covariates character vector of names of placebo variables
+#' @param outcome name of outcome variable
+#' @param cv_folds integer. Number of cross-validation folds (see `?contest()`)
+#' @param min_penalty_exp minimum penalty exponent (default -6 for more conservative start)
+#' @param max_penalty_exp maximum penalty exponent (default -1 for small data sets)
+#' @param verbose logical. Whether to print detailed information during contests (see `?contest()`)
+#' @export
+pick_winner <- function(data,
+                        outcome,
+                        covariates,
+                        cv_folds = 5,
+                        min_penalty_exp = -1,
+                        max_penalty_exp = 6,
+                        verbose = FALSE) {
+
+  ###########################################################################
+  # AUTO MODE: Contest selection
+  ###########################################################################
+
+  argg <- as.list(match.call())[-1]
+
+  # Run contest
+  if (verbose) cat("=== Model selection diagnostics ===\n")
+  contest_results <- do.call(contest, argg)
+
+  if (!verbose) {
+    cat("Contest selected:", contest_results$best_model_name,
+        "(R-squared = ", round(contest_results$best_cv_rsq, 4), ")\n")
+  }
+
+  # Prepare pwtest with contest winner
+  model_spec <- contest_results$best_spec
+  engine <- contest_results$best_engine
+  if (!is.null(contest_results$best_recipe)) {
+    recipe <- contest_results$best_recipe
+  }
+
+  if (verbose) cat("\n--- Returning contest winner ---\n")
+
+  # Return pwtest result directly
+  return(list(model_spec = model_spec, engine = engine, recipe = recipe))
+
 }

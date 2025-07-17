@@ -4,7 +4,7 @@
 \alias{plot_pbal}
 \title{Generates plot showing standardized covariate difference-in-means and prognosis from prognosis-weighted test results}
 \usage{
-plot_pbal(pwtest_output, label_option = "none")
+plot_pbal(pwtest_output, label_option = "minmax")
 }
 \arguments{
 \item{pwtest_output}{Output from \code{pwtest()} function.}
