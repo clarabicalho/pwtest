@@ -8,6 +8,7 @@
 #' @param engine character. Engine type used for the model specified in `model_spec`. See https://www.tidymodels.org/find/parsnip/#models for all available engines for each model. If not defined, uses default engine defined by `model_spec` type in package `parsnip`, if available.
 #' @param formula object of class formula or character describing the model to fit `model_spec` on control sample. Defaults to regressing outcome on full set of covariates defined by `covariates`.
 #' @param cv_auto logical Whether to perform automatic cross-validation and run test on contest winner. If `TRUE`, `model_spec` and `engine` will be overwritten by contest winner.
+#' @param return_uwtest logical. Whether to return results from unweighted test as well.
 #' @param ... additional cross-validation arguments when `cv_auto = TRUE`. See `?pick_winner`.
 #' @importFrom parsnip linear_reg fit set_engine
 #' @importFrom yardstick metrics
@@ -24,6 +25,7 @@ pwtest <- function(data,
                    engine = NULL,
                    formula = NULL,
                    cv_auto = FALSE,
+                   return_uwtest = FALSE,
                    ...) {
 
   if(cv_auto & !is.null(model_spec)) {
@@ -182,6 +184,7 @@ pwtest <- function(data,
   bal_formula <- as.formula(paste0(treatment, "~", paste(covariates, collapse = "+")))
   bal_rsqr <- summary(lm(bal_formula, data = data))$r.squared
 
+
   # output ------------------------------------------------------------------
 
   #pwdelta estimates
@@ -194,6 +197,16 @@ pwtest <- function(data,
     pwdelta_se = pwdelta_se,
     pwdelta_p = get_pvalue_pw(bstats, pwdelta_obs, n_bootstraps)
   )
+
+  # unweighted test
+  if(return_uwtest){
+    uwdelta <- uwtest(data = data, covariates = covariates, treatment = treatment,
+                      outcome = outcome, n_bootstraps = n_bootstraps)
+    est_data <- cbind(
+      est_data,
+      uwdelta[,-1]
+    )
+  }
 
   # append estimates from linear regression if missing
   if(!is.null(pwtest_lm)) {

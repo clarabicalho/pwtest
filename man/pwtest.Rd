@@ -14,6 +14,7 @@ pwtest(
   engine = NULL,
   formula = NULL,
   cv_auto = FALSE,
+  return_uwtest = FALSE,
   ...
 )
 }
@@ -35,6 +36,8 @@ pwtest(
 \item{formula}{object of class formula or character describing the model to fit \code{model_spec} on control sample. Defaults to regressing outcome on full set of covariates defined by \code{covariates}.}
 
 \item{cv_auto}{logical Whether to perform automatic cross-validation and run test on contest winner. If \code{TRUE}, \code{model_spec} and \code{engine} will be overwritten by contest winner.}
+
+\item{return_uwtest}{logical. Whether to return results from unweighted test as well.}
 
 \item{...}{additional cross-validation arguments when \code{cv_auto = TRUE}. See \code{?pick_winner}.}
 }
