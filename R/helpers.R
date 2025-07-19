@@ -243,7 +243,7 @@ pw_delta_rdd <- function(data, covariates, running_var, treatment, outcome,
     parsnip::fit(formula = as.formula(paste0(outcome, "~.")), data = datc)
   #complete data
   # data_nona <- as.data.frame(data[,c(outcome, covariates, running_var)]) %>% drop_na
-  Y0hat <- predict(fit_Yc, data[,covariates]) %>% pull
+  Y0hat <- data[,covariates, drop = FALSE] %>% predict(fit_Yc, .) %>% pull
 
   # code values for rdrobust arguments
   if(!"y" %in% names(argg)) argg$y <- as.vector(Y0hat)
@@ -266,7 +266,7 @@ pw_delta_rdd <- function(data, covariates, running_var, treatment, outcome,
   #complete data
   databw_nona <- as.data.frame(data_bw[,c(outcome, covariates, running_var, treatment)]) %>% drop_na
   # fitted values of Y0 with prognosis weights within the bandwidth
-  argg$y <- predict(fit_Yc, databw_nona[,c(covariates)]) %>% pull # overwrite outcome with within-bw prognostic weights
+  argg$y <- databw_nona[,covariates, drop = FALSE] %>% predict(fit_Yc, .) %>% pull # overwrite outcome with within-bw prognostic weights
   argg$x <- databw_nona[[running_var]] # overwrite outcome with within-bw prognostic weights
   rd_argg <- intersect(names(argg), names(formals(rdrobust)))
 
