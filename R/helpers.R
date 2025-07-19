@@ -9,23 +9,39 @@ stdr <- function(x){
 
 capture_warnings_apply <- function(X, MARGIN, FUN, ...) {
   warnings <- character()  # store warning messages
+  errors <- character()
 
   # wrapper around FUN to collect warnings
   wrapper <- function(...) {
     withCallingHandlers(
-      FUN(...),
+      tryCatch(
+        FUN(...),
+        error = function(e) {
+          errors <<- c(errors, conditionMessage(e))
+          return(NULL)  # return NA on error
+        }
+      ),
       warning = function(w) {
         warnings <<- c(warnings, conditionMessage(w))
-        invokeRestart("muffleWarning")  # suppress immediate printing
+        # if (immediate_warning) {
+        #   message("Warning: ", conditionMessage(w))
+        # }
+        invokeRestart("muffleWarning")
       }
     )
   }
 
+
   result <- apply(X, MARGIN, wrapper, ...)
 
   unique_warnings <- unique(warnings)
+  unique_errors <- unique(errors)
+
   if (length(unique_warnings) > 0) {
-    warning(paste(unique_warnings, collapse = "\n"))
+    warning("Warnings:\n", paste(unique_warnings, collapse = "\n"))
+  }
+  if (length(unique_errors) > 0) {
+    warning("Errors:\n", paste(unique_errors, collapse = "\n"))
   }
 
   result
@@ -203,27 +219,35 @@ pw_delta_rdd <- function(data, covariates, running_var, treatment, outcome,
     warning("Arguments `treatment` and `c` both specified, will use `treatment` var to define treatment condition, but `c` will be passed onto `rdrobust()`. Please ensure the values coded in `treatment` are consistent with value of `c`.")
   }
 
-  # obtain prognostic weights/coefficients for each covariate calculated for
-  # all control units in the full data
-  pw_full <- pw(data = data, covariates = covariates, treatment = treatment, outcome = outcome)
+  # # obtain prognostic weights/coefficients for each covariate calculated for
+  # # all control units in the full data
+  # pw_full <- pw(data = data, covariates = covariates, treatment = treatment, outcome = outcome)
+  #
+  # if(any(is.na(pw_full))) stop("Prognosis weights cannot be calculated for the following covariates: ",
+  #                                 paste0(names(pw_full)[is.na(pw_full)], collapse = ", "),
+  #                                 ". Consider removing these covariates or using a different method to calculate prognosis weights.")
+  #
+  # if(length(unique(data[[outcome]]))==1L){
+  #   data <- data %>%
+  #     dplyr::mutate_at(.vars = c(covariates),
+  #                      .funs = stdr) %>% as.data.frame()
+  # }
+  #
+  # # fitted values of Y0 with prognosis weights
+  # # (estimated coefs from control group regression of Y0 on covariates)
+  # Y0hat <- as.matrix(data[,covariates])%*%as.matrix(pw_full, nrow = length(pw_full))
 
-  if(any(is.na(pw_full))) stop("Prognosis weights cannot be calculated for the following covariates: ",
-                                  paste0(names(pw_full)[is.na(pw_full)], collapse = ", "),
-                                  ". Consider removing these covariates or using a different method to calculate prognosis weights.")
-
-  if(length(unique(data[[outcome]]))==1L){
-    data <- data %>%
-      dplyr::mutate_at(.vars = c(covariates),
-                       .funs = stdr) %>% as.data.frame()
-  }
-
-  # fitted values of Y0 with prognosis weights
-  # (estimated coefs from control group regression of Y0 on covariates)
-  Y0hat <- as.matrix(data[,covariates])%*%as.matrix(pw_full, nrow = length(pw_full))
+  # data to fit Yc(0)
+  datc <- data[data[,treatment] == 0, c(outcome, covariates)]
+  fit_Yc <- parsnip::linear_reg() %>%
+    parsnip::fit(formula = as.formula(paste0(outcome, "~.")), data = datc)
+  #complete data
+  # data_nona <- as.data.frame(data[,c(outcome, covariates, running_var)]) %>% drop_na
+  Y0hat <- predict(fit_Yc, data[,covariates]) %>% pull
 
   # code values for rdrobust arguments
-  if(!"y" %in% names(argg)) argg$y <- Y0hat
-  if(!"x" %in% names(argg)) argg$x <- data[[running_var]]
+  if(!"y" %in% names(argg)) argg$y <- as.vector(Y0hat)
+  if(!"x" %in% names(argg)) argg$x <- as.vector(data[[running_var]])
 
   # rdrobust() inherits arguments from pwtest()
   rd_argg <- intersect(names(argg), names(formals(rdrobust)))
@@ -238,13 +262,12 @@ pw_delta_rdd <- function(data, covariates, running_var, treatment, outcome,
   cutoff <- ifelse("c" %in% names(argg), argg$c, 0)
 
   data_bw <- subset(data, data[[running_var]] >= cutoff - argg$h & data[[running_var]] <= cutoff + argg$h)
-
-  pw_bw <- pw(data = data_bw, covariates = covariates, treatment = treatment, outcome = outcome)
-
+  datbwc <- data_bw[data_bw[,treatment] == 0, c(outcome, covariates)]
+  #complete data
+  databw_nona <- as.data.frame(data_bw[,c(outcome, covariates, running_var, treatment)]) %>% drop_na
   # fitted values of Y0 with prognosis weights within the bandwidth
-  # (estimated coefs from control group regression of Y0 on covariates)
-  Y0hat <- as.matrix(data[,covariates])%*%as.matrix(pw_bw, nrow = length(pw_bw))
-  argg$y <- Y0hat # overwrite outcome with within-bw prognostic weights
+  argg$y <- predict(fit_Yc, databw_nona[,c(covariates)]) %>% pull # overwrite outcome with within-bw prognostic weights
+  argg$x <- databw_nona[[running_var]] # overwrite outcome with within-bw prognostic weights
   rd_argg <- intersect(names(argg), names(formals(rdrobust)))
 
   # run dii estimation on reweighted (within-bandwidth) fitted Y0hat
@@ -265,7 +288,7 @@ pw_delta_rdd <- function(data, covariates, running_var, treatment, outcome,
   # All other values are rdrobust defaults if not set by user.
   dii_covs <- sapply(covariates, function(covariate){
     argg_cov <- argg
-    argg_cov$y <- data[[covariate]]
+    argg_cov$y <- databw_nona[[covariate]]
     argg_new <- intersect(names(argg), names(formals(rdrobust)))
     rd <- do.call("rdrobust", args = argg_cov[argg_new])
     if(rd_estimator == "h") uwd <- unname(rd$Estimate[,"tau.us"])
@@ -275,19 +298,20 @@ pw_delta_rdd <- function(data, covariates, running_var, treatment, outcome,
 
   # R-squared from prognosis regression
   prog_mod_f <- paste(c(outcome, paste(covariates, collapse = " + ")), collapse = " ~ ")
-  prog_mod <- stats::lm(formula = prog_mod_f, data = data_bw[data_bw[[substitute(treatment)]] == 0, ])
+  prog_mod <- stats::lm(formula = prog_mod_f, data = databw_nona[databw_nona[[treatment]] == 0, ])
   prog_Rsq <- summary(prog_mod)$r.squared
 
   # R-squared from balance regression
   bal_mod_f <- paste(c(treatment, paste(covariates, collapse = " + ")), collapse = " ~ ")
-  bal_mod <- stats::lm(formula = bal_mod_f, data = data_bw)
+  bal_mod <- stats::lm(formula = bal_mod_f, data = databw_nona)
   bal_Rsq <- summary(bal_mod)$r.squared
 
   return(list(dii = dii_covs,
               uwdelta = sum(dii_covs),
-              pw = pw_bw,
               pwdelta = pwdelta,
               pwdelta_se = rd_out$se,
+              prog_Rsq = prog_Rsq,
+              bal_Rsq = bal_Rsq,
               rdrobust_output = rd_out))
 
 }
@@ -336,7 +360,7 @@ std_data <- function(data, variables, treatment_col) {
 }
 
 get_pvalue_uw <- function(sim_d, ref_d, bootstrap_n){
-  sum(abs(unlist(sapply(sim_d, function(x) x[["uwdelta"]]))) >= abs(ref_d)) / bootstrap_n
+  sum(abs(sim_d) >= abs(ref_d)) / bootstrap_n
 }
 
 get_pvalue_pw <- function(sim_d, ref_d, bootstrap_n){
@@ -869,6 +893,7 @@ contest <- function(data, covariates, outcome, cv_folds = 5, verbose = TRUE,
 
   return(contest_results)
 }
+
 #' Validate contest results for prognostic_balance integration
 #' @param contest_output Output from contest() function
 validate_contest_output <- function(contest_output) {

@@ -84,8 +84,16 @@ pwtest_rdd <- function(data,
     bsample[bs_t, running_var] <- -(bsample[bs_t, running_var])
     # cutoff takes default value as in rdrobust() if not specified by user
     cutoff <- ifelse("c" %in% names(argg), argg$c, 0)
-    pwbstats <- do.call("pw_delta_rdd", args = modifyList(argg, list(data = bsample)))
-
+    pwbstats <- tryCatch(
+      expr = {
+        do.call("pw_delta_rdd", args = modifyList(argg, list(data = bsample)))
+      },
+      error = function(e) {
+        out <- vector(mode = "list", length = length(pwdelta_obs))
+        names(out) <- names(pwdelta_obs)
+        return(out)
+      }
+    )
     return(c(pwbstats))
   }
 
@@ -101,29 +109,7 @@ pwtest_rdd <- function(data,
     add_samples <- get_bootstrap_samples(control_i, length(treat_i), n_bootstraps-nc_bootstraps)
 
     # obtain delta distribution based on resamples
-    add_bstats <- apply(samples, 2, function(z) {
-      bsample <- data[z, ]
-      # change treatment condition from control to treatment for bootstrap treatment group
-      bsample[[treatment]][1:length(treat_i)] <- 1
-
-      bs_t <- bsample[[treatment]] == 1
-      # invert the running variable for the bootstrap sample of treatment observations
-      bsample[bs_t, running_var] <- -(bsample[bs_t, running_var])
-      # cutoff takes default value as in rdrobust() if not specified by user
-      cutoff <- ifelse("c" %in% names(argg), argg$c, 0)
-      pwbstats <- tryCatch(
-        expr = {
-          do.call("pw_delta_rdd", args = modifyList(argg, list(data = bsample)))
-        },
-        error = function(e) {
-          out <- vector(mode = "list", length = length(pwdelta_obs))
-          names(out) <- names(pwdelta_obs)
-          return(out)
-        }
-      )
-
-      return(c(pwbstats))
-    })
+    add_bstats <- capture_warnings_apply(add_samples, 2, pwdelta_from_draw)
 
     bstats <- c(bstats, add_bstats)
     na_check <- sapply(bstats, function(e) !is.null(e[["pwdelta"]]))
@@ -153,17 +139,6 @@ pwtest_rdd <- function(data,
     pw_delta_t <- pwdelta_obs$pwdelta / pwdelta_se
     pw_delta_p <- 2 * pnorm(-abs(pw_delta_t))
   }
-
-  # balance and prognostic R^2 ----------------------------------------------
-  # R-squared from prognosis regression
-  prog_mod_f <- paste(c(outcome, paste(covariates, collapse = " + ")), collapse = " ~ ")
-  prog_mod <- lm(formula = prog_mod_f, data = data[data[,treatment] == 0, ])
-  prog_Rsq <- summary(prog_mod)$r.squared
-
-  # R-squared from balance regression
-  bal_mod_f <- paste(c(treatment, paste(covariates, collapse = " + ")), collapse = " ~ ")
-  bal_mod <- lm(formula = bal_mod_f, data = data)
-  bal_Rsq <- summary(bal_mod)$r.squared
 
   # output ------------------------------------------------------------------
 
@@ -195,8 +170,8 @@ pwtest_rdd <- function(data,
     estimates = estimates,
     cov_table = cov_table,
     rdrobust_output = pwdelta_obs$rdrobust_output,
-    prog_Rsq = prog_Rsq,
-    bal_Rsq = bal_Rsq
+    prog_Rsq = pwdelta_obs$bal_Rsq,
+    bal_Rsq = pwdelta_obs$bal_Rsq
   )
 
   return(estimates)
