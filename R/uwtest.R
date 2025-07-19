@@ -4,6 +4,7 @@
 #' @param treatment name of variable indicating (binary) treatment assigned
 #' @param outcome name of outcome variable
 #' @param n_bootstraps numeric scalar indicating number of bootstraps to use for the resampling-based p-values
+#' @param se_type character. Which type of standard error to return.
 #' @returns data.frame containing unweighted delta statistic, its analytic standard error and bootstrap p-value as well as the number of bootstraps used.
 #' @export
 
@@ -11,7 +12,10 @@ uwtest <- function(data,
                    covariates = c("X1", "X2", "X3"),
                    treatment = "Z",
                    outcome = "Y",
-                   n_bootstraps = 500) {
+                   n_bootstraps = 500,
+                   se_type = c("bootstrap", "analytic")) {
+
+  se_type <- match.arg(se_type)
 
   # observed statistics-------------------------------------
 
@@ -69,18 +73,25 @@ uwtest <- function(data,
   # standardize bootstrap population relative to control group SD
   data_stdc <- std_data(data, c(outcome, covariates), treatment)
 
+  # check if all values constant in any covariate
+  ux_values <- sapply(covariates, function(var) length(unique(data_stdc[,var]))==1L)
+  if(any(ux_values)) stop("Variable(s)",
+                          paste0(covariates[ux_values], collapse = ", "),
+                          "are constant within the bandwidth. Try a wider bandwidth 'h'.")
+
   # obtain delta distribution from bootstrap samples
   bstats <- apply(samples, 2, function(z) {
     bsample <- data_stdc[z, ]
     bsample[[treatment]][1:length(treat_i)] <- 1
 
-    DIM <- sapply(covariates, function(x){
-      tres <- t.test(bsample[treat_i, x], bsample[control_i, x], na.rm = TRUE)
-      dim <- tres$estimate[1] - tres$estimate[2]
-      return(unname(dim))
-    })
-
-    return(sum(DIM))
+    tryCatch({
+      DIM <- sapply(covariates, function(x){
+        tres <- t.test(bsample[treat_i, x], bsample[control_i, x], na.rm = TRUE)
+        dim <- tres$estimate[1] - tres$estimate[2]
+        return(unname(dim))
+      })
+      return(sum(DIM))
+    }, error = function(e) return(NA))
   })
 
   # check for completeness and draw additional bootstrap samples if necessary
@@ -108,7 +119,7 @@ uwtest <- function(data,
   }
 
   # SE bootstrap distribution
-  # uwdelta_se <- sd(bstats, na.rm = TRUE) * (n_bootstraps - 1) / n_bootstraps
+  uwdelta_se_b <- sd(bstats, na.rm = TRUE) * (n_bootstraps - 1) / n_bootstraps
 
   # output ------------------------------------------------------------------
 
@@ -116,7 +127,10 @@ uwtest <- function(data,
   est_data <- data.frame(
     n_bootstraps = n_bootstraps,
     uwdelta = sum(DIM),
-    uwdelta_se = uwdelta_se,
+    uwdelta_se = switch(se_type,
+      "analytic" = uwdelta_se,
+      "bootstrap" = uwdelta_se_b),
+    uwdelta_se,
     uwdelta_p = get_pvalue_uw(bstats, sum(DIM), n_bootstraps)
   )
 

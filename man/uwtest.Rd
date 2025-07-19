@@ -9,7 +9,8 @@ uwtest(
   covariates = c("X1", "X2", "X3"),
   treatment = "Z",
   outcome = "Y",
-  n_bootstraps = 500
+  n_bootstraps = 500,
+  se_type = c("bootstrap", "analytic")
 )
 }
 \arguments{
@@ -22,6 +23,8 @@ uwtest(
 \item{outcome}{name of outcome variable}
 
 \item{n_bootstraps}{numeric scalar indicating number of bootstraps to use for the resampling-based p-values}
+
+\item{se_type}{character. Which type of standard error to return.}
 }
 \value{
 data.frame containing unweighted delta statistic, its analytic standard error and bootstrap p-value as well as the number of bootstraps used.
