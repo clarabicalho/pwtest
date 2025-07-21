@@ -18,20 +18,35 @@ uwtest <- function(data,
   se_type <- match.arg(se_type)
 
   # observed statistics-------------------------------------
+  # list-wise deletion
+  datac <- data[complete.cases(data[,c(outcome,treatment,covariates)]),]
 
   # standardize data relative to entire study group (the finite population)
-  data <- data %>%
+
+  data <- datac %>%
     mutate_at(.vars = c(outcome, covariates),
               .funs = scale) %>% as.data.frame()
 
   treat_i <- which(data[[treatment]] == 1)
   control_i <- which(data[[treatment]] == 0)
 
+  # check if all values constant in any covariate
+  ux_values <- sapply(covariates, function(var) length(unique(data[control_i,var]))==1L)
+
+  if(any(ux_values)) stop("Variable(s) ",
+                          paste0(covariates[ux_values], collapse = ", "),
+                          " are constant in the non-missing control data.")
+
   # difference in means -----------------------------------------------------
-  DIM <- sapply(covariates, function(x){
-    tres <- t.test(data[treat_i, x], data[control_i, x], na.rm = TRUE)
-    dim <- tres$estimate[1] - tres$estimate[2]
-    return(unname(dim))
+  DIM <- sapply(covariates, function(x) {
+    tryCatch({
+      tres <- t.test(data[treat_i, x], data[control_i, x], na.rm = TRUE)
+      dim <- tres$estimate[1] - tres$estimate[2]
+      return(unname(dim))
+    }, error = function(e) {
+      message(sprintf("Error in t.test for covariate '%s': %s", x, e$message))
+      return(NA)
+    })
   })
 
 
@@ -42,8 +57,7 @@ uwtest <- function(data,
   if(any(is.nan(DIM))) stop(paste0("The following covariates have no observations in either treatment or control conditions or covariate values are constant across both groups (so cannot be standardized): ",
                                    paste(cov_nan, collapse = ", "), ". Consider removing these covariates."))
 
-  # list-wise deletion to get analytic standard error
-  datac <- data[complete.cases(data[,covariates]),]
+  #analytic standard error
   Nc <- nrow(datac) # changed from data_uw
   z0c <- datac[[treatment]] == 0
   n1c <- sum(!z0c, na.rm = TRUE)
@@ -73,16 +87,13 @@ uwtest <- function(data,
   # standardize bootstrap population relative to control group SD
   data_stdc <- std_data(data, c(outcome, covariates), treatment)
 
-  # check if all values constant in any covariate
-  ux_values <- sapply(covariates, function(var) length(unique(data_stdc[,var]))==1L)
-  if(any(ux_values)) stop("Variable(s)",
-                          paste0(covariates[ux_values], collapse = ", "),
-                          "are constant within the bandwidth. Try a wider bandwidth 'h'.")
-
   # obtain delta distribution from bootstrap samples
   bstats <- apply(samples, 2, function(z) {
     bsample <- data_stdc[z, ]
     bsample[[treatment]][1:length(treat_i)] <- 1
+
+    treat_i <- which(bsample[[treatment]] == 1)
+    control_i <- which(bsample[[treatment]] == 0)
 
     tryCatch({
       DIM <- sapply(covariates, function(x){
@@ -105,16 +116,20 @@ uwtest <- function(data,
       bsample <- data_stdc[z, ]
       bsample[[treatment]][1:length(treat_i)] <- 1
 
-      DIM <- sapply(covariates, function(x){
-        tres <- t.test(data[treat_i, x], data[control_i, x], na.rm = TRUE)
-        dim <- tres$estimate[1] - tres$estimate[2]
-        return(unname(dim))
-      })
+      treat_i <- which(bsample[[treatment]] == 1)
+      control_i <- which(bsample[[treatment]] == 0)
 
-      return(sum(DIM))
+      tryCatch({
+        DIM <- sapply(covariates, function(x){
+          tres <- t.test(bsample[treat_i, x], bsample[control_i, x], na.rm = TRUE)
+          dim <- tres$estimate[1] - tres$estimate[2]
+          return(unname(dim))
+        })
+        return(sum(DIM))
+      }, error = function(e) return(NA))
     })
 
-    bstats <- c(bstats, add_bstats)
+    bstats <- c(bstats[!is.na(bstats)], add_bstats[!is.na(add_bstats)])
     nc_bootstraps <- sum(!is.na(bstats))
   }
 
@@ -130,7 +145,6 @@ uwtest <- function(data,
     uwdelta_se = switch(se_type,
       "analytic" = uwdelta_se,
       "bootstrap" = uwdelta_se_b),
-    uwdelta_se,
     uwdelta_p = get_pvalue_uw(bstats, sum(DIM), n_bootstraps)
   )
 
