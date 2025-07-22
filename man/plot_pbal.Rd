@@ -17,5 +17,5 @@ plot_pbal(pwtest_output, label_option = "minmax", show_color_legend = TRUE)
 Generates plot showing standardized covariate difference-in-means and prognosis from prognosis-weighted test results
 }
 \details{
-The plot offers a visual diagnostic for covariate-by-covariate standardized difference in means and prognosis weights from standardized coefficients of prognostic regression of $Y^C(0)$ on set of covariates. The black dots show covariates with significant p-values ($\alpha = 0.05$) two-tailed t-tests of difference in means. The red triangle indicates the value of the R-squared from the prognosis regression on the x-axis and the balance regression on the y-axis.
+The plot offers a visual diagnostic for covariate-by-covariate standardized difference in means and prognosis weights from standardized coefficients of prognostic regression of $Y^C(0)$ on set of covariates. The black dots show covariates with significant p-values (\eqn{\alpha = 0.05}) two-tailed t-tests of difference in means. The red triangle indicates the value of the R-squared from the prognosis regression on the x-axis and the balance regression on the y-axis.
 }
