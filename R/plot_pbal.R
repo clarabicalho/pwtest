@@ -2,7 +2,7 @@
 #' @param pwtest_output Output from `pwtest()` function.
 #' @param label_option character. Label covariates with most extreme values ("minmax" is default), all covariates ("all"), or none ("none").
 #' @param show_color_legend logical. Whether to show the color legend of the significance of p-values for covariate-by-covariate t-tests.
-#' @details The plot offers a visual diagnostic for covariate-by-covariate standardized difference in means and prognosis weights from standardized coefficients of prognostic regression of $Y^C(0)$ on set of covariates. The black dots show covariates with significant p-values ($\alpha = 0.05$) two-tailed t-tests of difference in means. The red triangle indicates the value of the R-squared from the prognosis regression on the x-axis and the balance regression on the y-axis.
+#' @details The plot offers a visual diagnostic for covariate-by-covariate standardized difference in means and prognosis weights from standardized coefficients of prognostic regression of $Y^C(0)$ on set of covariates. The black dots show covariates with significant p-values (\eqn{\alpha = 0.05}) two-tailed t-tests of difference in means. The red triangle indicates the value of the R-squared from the prognosis regression on the x-axis and the balance regression on the y-axis.
 #' @import ggplot2
 #' @export
 

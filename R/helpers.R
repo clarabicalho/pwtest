@@ -380,6 +380,7 @@ adjust_se <- function(values, nsims) {
 #' @param verbose logical. Whether to print detailed contest report
 #' @param min_penalty_exp minimum penalty exponent (default -6 for more conservative start)
 #' @param max_penalty_exp maximum penalty exponent (default -1 for small data sets)
+#' @param subset_workflow character vector containing the labels of workflows to subset the contest on. See Details for more information.
 #' @importFrom rlang .data
 #' @importFrom tibble tibble
 #' @importFrom dplyr select mutate filter arrange desc semi_join pull
@@ -397,7 +398,12 @@ adjust_se <- function(values, nsims) {
 #' @importFrom yardstick metric_set rmse rsq
 #' @export
 contest <- function(data, covariates, outcome, cv_folds = 5, verbose = TRUE,
-                    min_penalty_exp = -6, max_penalty_exp = -1) {
+                    min_penalty_exp = -6, max_penalty_exp = -1, subset_workflow = NULL) {
+
+  if(!is.null(subset_workflow) &
+     any(!subset_workflow %in% c("linear", "linear_poly", "linear_interact", "linear_poly_interact",
+                                 "lasso_poly", "lasso_interact", "lasso_poly_interact",
+                                 "random_forest", "gradient_boosting"))) stop("One or more values of `subset_workflow` invalid. See Details in ??contest.")
 
   if(verbose) cat("=== CONTEST FUNCTION REPORT ===\n")
 
@@ -584,6 +590,12 @@ contest <- function(data, covariates, outcome, cv_folds = 5, verbose = TRUE,
 
   # Use robust metrics
   robust_metrics <- yardstick::metric_set(yardstick::rmse, yardstick::rsq)
+
+
+  # Mid-step if user specifies subset of workflows
+  if(!is.null(subset_workflow)){
+    targeted_workflows <- targeted_workflows[targeted_workflows$wflow_id %in% subset_workflow,]
+  }
 
   # Step 6: Model Fitting
   if(verbose) {

@@ -29,7 +29,7 @@ pwtest <- function(data,
                    ...) {
 
   if(cv_auto & !is.null(model_spec)) {
-    warning("Argument `model_spec` will be overwritten by contest winner since `cv_auto = TRUE`. If you want to use a specific model, set `cv_auto = FALSE`.")
+    warning("Argument `model_spec` will be overwritten by contest winner since `cv_auto = TRUE`. To use a specific model, set `cv_auto = FALSE`.")
   }
   if(!cv_auto & (is.null(model_spec) | all(class(model_spec) != "model_spec"))) {
     stop("Argument `model_spec` must be an object of class `model_spec` from package `parsnip`. See https://www.tidymodels.org/find/parsnip/#models for more details.")
@@ -37,7 +37,7 @@ pwtest <- function(data,
   if(!is.null(formula)){
     if(is.character(formula)) formula <- as.formula(formula)
     else{
-      stop("Argument `formula` must be either of class character of formula.")
+      stop("Argument `formula` must be either of class character or formula.")
     }
   }
   if(any(!is.character(outcome), !is.character(treatment), !is.character(covariates))){
@@ -87,7 +87,7 @@ pwtest <- function(data,
     winner <- do.call(pick_winner, argg_contest)
     model_spec <- winner$model_spec
     engine <- winner$engine
-    # argg$recipe <- winner$recipe
+    argg$recipe <- winner$recipe
   }
 
   # observed statistics -------------------------------------
@@ -156,6 +156,9 @@ pwtest <- function(data,
   if(!"linear_reg" %in% class(model_spec)){
     argg$model_spec <- linear_reg(mode = "regression", engine = "lm")
     argg$engine <- NULL; argg$formula <- NULL
+    argg$recipe <- NULL; argg$cv_auto <- FALSE
+    argg$verbose <- FALSE
+    argg$subset_workflow <- NULL
     pwtest_lm <- do.call("pwtest", args = argg)
   } else {
     pwtest_lm <- NULL
@@ -183,7 +186,6 @@ pwtest <- function(data,
 
   bal_formula <- as.formula(paste0(treatment, "~", paste(covariates, collapse = "+")))
   bal_rsqr <- summary(lm(bal_formula, data = data))$r.squared
-
 
   # output ------------------------------------------------------------------
 
@@ -245,6 +247,7 @@ pwtest <- function(data,
 #' @param cv_folds integer. Number of cross-validation folds (see `?contest()`)
 #' @param min_penalty_exp minimum penalty exponent (default -6 for more conservative start)
 #' @param max_penalty_exp maximum penalty exponent (default -1 for small data sets)
+#' @param subset_workflow character vector containing the labels of workflows to subset the contest on. See Details for more information.
 #' @param verbose logical. Whether to print detailed information during contests (see `?contest()`)
 #' @export
 pick_winner <- function(data,
@@ -253,7 +256,9 @@ pick_winner <- function(data,
                         cv_folds = 5,
                         min_penalty_exp = -1,
                         max_penalty_exp = 6,
-                        verbose = FALSE) {
+                        subset_workflow = NULL,
+                        verbose = FALSE
+                        ) {
 
   ###########################################################################
   # AUTO MODE: Contest selection
