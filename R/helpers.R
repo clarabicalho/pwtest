@@ -852,15 +852,15 @@ contest <- function(data, covariates, outcome, cv_folds = 5, verbose = TRUE,
   }
 
   # Get linear baseline performance for comparison
-  linear_idx <- which(model_performance$wflow_id == "linear")
-  if (length(linear_idx) > 0 && model_performance$best_rsq[linear_idx] != 0) {
-    linear_cv_rmse <- model_performance$best_rmse[linear_idx]
-    linear_cv_rsq <- model_performance$best_rsq[linear_idx]
-  } else {
-    # Fallback if linear model failed
-    linear_cv_rmse <- model_performance$best_rmse[best_model_idx]
-    linear_cv_rsq <- model_performance$best_rsq[best_model_idx]
-  }
+  # linear_idx <- which(model_performance$wflow_id == "linear")
+  # if (length(linear_idx) > 0 && model_performance$best_rsq[linear_idx] != 0) {
+  #   linear_cv_rmse <- model_performance$best_rmse[linear_idx]
+  #   linear_cv_rsq <- model_performance$best_rsq[linear_idx]
+  # } else {
+  #   # Fallback if linear model failed
+  #   linear_cv_rmse <- model_performance$best_rmse[best_model_idx]
+  #   linear_cv_rsq <- model_performance$best_rsq[best_model_idx]
+  # }
 
   # Return comprehensive results object compatible with wrapper
   contest_results <- list(
@@ -875,8 +875,8 @@ contest <- function(data, covariates, outcome, cv_folds = 5, verbose = TRUE,
     best_cv_rsq = model_performance$best_rsq[best_model_idx],
 
     # Linear baseline for comparison
-    linear_cv_rmse = linear_cv_rmse,
-    linear_cv_rsq = linear_cv_rsq,
+    # linear_cv_rmse = linear_cv_rmse,
+    # linear_cv_rsq = linear_cv_rsq,
 
     # Diagnostics and report
     verbose_info = if(verbose) {
