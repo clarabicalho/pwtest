@@ -11,6 +11,7 @@ pick_winner(
   cv_folds = 5,
   min_penalty_exp = -1,
   max_penalty_exp = 6,
+  subset_workflow = NULL,
   verbose = FALSE
 )
 }
@@ -26,6 +27,8 @@ pick_winner(
 \item{min_penalty_exp}{minimum penalty exponent (default -6 for more conservative start)}
 
 \item{max_penalty_exp}{maximum penalty exponent (default -1 for small data sets)}
+
+\item{subset_workflow}{character vector containing the labels of workflows to subset the contest on. See Details for more information.}
 
 \item{verbose}{logical. Whether to print detailed information during contests (see \code{?contest()})}
 }
