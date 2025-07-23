@@ -68,6 +68,7 @@ pwtest <- function(data,
 
   # restrict data to variables of interest
   data <- data[,c(treatment, covariates, outcome)]
+  data <- tidyr::drop_na(data)
 
   treat_i <- which(data[[treatment]] == 1)
   control_i <- which(data[[treatment]] == 0)
@@ -107,8 +108,10 @@ pwtest <- function(data,
     bind_cols(!!outcome := as.vector(datc[[outcome]])) %>%
     yardstick::metrics(outcome, .pred)
   predict_Yt <-  predict(fit_Yc, datt)
+  predict_Yc <-  predict(fit_Yc, datc)
   # observed \overline{\widehat{Y^T(0)}} - \overline{Y^C(0)}
-  pwdelta_obs <-  mean(predict_Yt$.pred, na.rm = TRUE) - mean(datc[[outcome]], , na.rm = TRUE)
+  pwdelta_obs <-  mean(predict_Yt$.pred, na.rm = TRUE) -
+    mean(predict_Yc$.pred, , na.rm = TRUE)
 
   # bootstrapping -------------------------------------
 
