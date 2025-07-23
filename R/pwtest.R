@@ -222,8 +222,8 @@ pwtest <- function(data,
         pwtest_lm$fit_metrics,
         cbind(model = class(model_spec)[1], fit_metrics)
       ),
-      prog_rsqr = pwtest_lm$fit_metrics %>% filter(.metric == "rsq") %>% pull(.estimate),
-      bal_rsqr = bal_rsqr
+      prog_Rsq = pwtest_lm$fit_metrics %>% filter(.metric == "rsq") %>% pull(.estimate),
+      bal_Rsq = bal_rsqr
     )
 
   } else {
