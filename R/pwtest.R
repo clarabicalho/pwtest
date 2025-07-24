@@ -127,6 +127,10 @@ pwtest <- function(data,
     bsample <- data_stdc[z, ]
     bsample[[treatment]][1:length(treat_i)] <- 1
 
+    fit_Yc <- model_spec %>%
+      fit(formula = formula,
+          data = bsample[bsample[[treatment]]==0,])
+
     predict_Yc <- predict(fit_Yc, bsample[bsample[[treatment]] == 0, ])
     predict_Yt <-  predict(fit_Yc, bsample[bsample[[treatment]] == 1, ])
     dY <- mean(predict_Yt$.pred, na.rm = TRUE) -
