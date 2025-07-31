@@ -494,7 +494,7 @@ contest <- function(data, covariates, outcome, cv_folds = 5, verbose = TRUE,
   n_features_base <- length(covariates)
 
   if(verbose) {
-    cat("\n-- Step 4: Lasso Tuning --\n")
+    cat("\n-- Step 4: Lasso and Ridge Tuning --\n")
     cat("Sample size:", n_obs, "\n")
     cat("Base features:", n_features_base, "\n")
   }
@@ -506,7 +506,7 @@ contest <- function(data, covariates, outcome, cv_folds = 5, verbose = TRUE,
   )
 
   if(verbose) {
-    cat("Lasso penalty range: 10^", min_penalty_exp, " to 10^", max_penalty_exp, "\n")
+    cat("Lasso/Ridge penalty range: 10^", min_penalty_exp, " to 10^", max_penalty_exp, "\n")
     cat("Penalty grid points:", nrow(lasso_grid), "\n")
     cat("Sample penalties:", paste(signif(lasso_grid$penalty[1:5], 3), collapse = ", "), "...\n")
     cat("Penalty range:", paste(signif(range(lasso_grid$penalty), 3), collapse = " to "), "\n")
@@ -515,33 +515,17 @@ contest <- function(data, covariates, outcome, cv_folds = 5, verbose = TRUE,
   lasso_spec <- parsnip::linear_reg(penalty = tune::tune(), mixture = 1) %>%
     parsnip::set_engine("glmnet")
 
-  # Tree model grids
-  rf_grid <- dials::grid_regular(
-    dials::mtry(range = c(1, min(length(covariates), 5))),
-    dials::trees(range = c(50, 200)),
-    levels = 3
-  )
+  ridge_spec <- parsnip::linear_reg(penalty = tune::tune(), mixture = 0) %>%
+    parsnip::set_engine("glmnet")
 
-  gbm_grid <- dials::grid_regular(
-    dials::mtry(range = c(1, min(length(covariates), 5))),
-    dials::trees(range = c(50, 200)),
-    dials::learn_rate(range = c(0.01, 0.3)),
-    levels = 3
-  )
-
-  rf_spec <- parsnip::rand_forest(mtry = tune::tune(), trees = tune::tune()) %>%
-    parsnip::set_engine("ranger") %>%
-    parsnip::set_mode("regression")
-
-  gbm_spec <- parsnip::boost_tree(mtry = tune::tune(), trees = tune::tune(), learn_rate = tune::tune()) %>%
-    parsnip::set_engine("xgboost") %>%
-    parsnip::set_mode("regression")
+  # Ridge uses same penalty grid as lasso
+  ridge_grid <- lasso_grid
 
   # Step 5: Workflows
   targeted_workflows <- tibble::tibble(
     wflow_id = c("linear", "linear_poly", "linear_interact", "linear_poly_interact",
                  "lasso_poly", "lasso_interact", "lasso_poly_interact",
-                 "random_forest", "gradient_boosting"),
+                 "ridge", "ridge_poly", "ridge_interact", "ridge_poly_interact"),
     info = list(
       list(workflow = list(workflows::workflow() %>% workflows::add_recipe(base_recipe) %>% workflows::add_model(linear_spec))),
       list(workflow = list(workflows::workflow() %>% workflows::add_recipe(poly_recipe) %>% workflows::add_model(linear_spec))),
@@ -550,8 +534,10 @@ contest <- function(data, covariates, outcome, cv_folds = 5, verbose = TRUE,
       list(workflow = list(workflows::workflow() %>% workflows::add_recipe(poly_recipe) %>% workflows::add_model(lasso_spec))),
       list(workflow = list(workflows::workflow() %>% workflows::add_recipe(interact_recipe) %>% workflows::add_model(lasso_spec))),
       list(workflow = list(workflows::workflow() %>% workflows::add_recipe(poly_interact_recipe) %>% workflows::add_model(lasso_spec))),
-      list(workflow = list(workflows::workflow() %>% workflows::add_recipe(base_recipe) %>% workflows::add_model(rf_spec))),
-      list(workflow = list(workflows::workflow() %>% workflows::add_recipe(base_recipe) %>% workflows::add_model(gbm_spec)))
+      list(workflow = list(workflows::workflow() %>% workflows::add_recipe(base_recipe) %>% workflows::add_model(ridge_spec))),
+      list(workflow = list(workflows::workflow() %>% workflows::add_recipe(poly_recipe) %>% workflows::add_model(ridge_spec))),
+      list(workflow = list(workflows::workflow() %>% workflows::add_recipe(interact_recipe) %>% workflows::add_model(ridge_spec))),
+      list(workflow = list(workflows::workflow() %>% workflows::add_recipe(poly_interact_recipe) %>% workflows::add_model(ridge_spec)))
     )
   )
 
@@ -581,7 +567,7 @@ contest <- function(data, covariates, outcome, cv_folds = 5, verbose = TRUE,
   }
 
   # Fitting function with detailed error capture
-  safe_fit_model <- function(wf_info, wf_name, lasso_grid, rf_grid, gbm_grid, cv_folds_obj, robust_metrics, verbose) {
+  safe_fit_model <- function(wf_info, wf_name, lasso_grid, ridge_grid, cv_folds_obj, robust_metrics, verbose) {
     wf <- wf_info$workflow[[1]]
 
     if(verbose) cat("Fitting model:", wf_name, "\n")
@@ -595,7 +581,8 @@ contest <- function(data, covariates, outcome, cv_folds = 5, verbose = TRUE,
         if (wf_name %in% c("linear", "linear_poly", "linear_interact", "linear_poly_interact")) {
           # No tuning needed for linear model
           tune::fit_resamples(wf, resamples = cv_folds_obj, metrics = robust_metrics)
-        } else if (wf_name %in% c("lasso_poly", "lasso_interact", "lasso_poly_interact")) {
+        } else if (wf_name %in% c("lasso_poly", "lasso_interact", "lasso_poly_interact",
+                                  "ridge", "ridge_poly", "ridge_interact", "ridge_poly_interact")) {
           # Test single penalty first
           if(verbose) {
             cat("  Testing single penalty value first...\n")
@@ -620,12 +607,12 @@ contest <- function(data, covariates, outcome, cv_folds = 5, verbose = TRUE,
             }
           }
 
-          # Tune with grid
-          tune::tune_grid(wf, resamples = cv_folds_obj, grid = lasso_grid, metrics = robust_metrics)
-        } else if (wf_name == "random_forest") {
-          tune::tune_grid(wf, resamples = cv_folds_obj, grid = rf_grid, metrics = robust_metrics)
-        } else if (wf_name == "gradient_boosting") {
-          tune::tune_grid(wf, resamples = cv_folds_obj, grid = gbm_grid, metrics = robust_metrics)
+          # Tune with grid - use appropriate grid based on model type
+          if (wf_name %in% c("ridge", "ridge_poly", "ridge_interact", "ridge_poly_interact")) {
+            tune::tune_grid(wf, resamples = cv_folds_obj, grid = ridge_grid, metrics = robust_metrics)
+          } else {
+            tune::tune_grid(wf, resamples = cv_folds_obj, grid = lasso_grid, metrics = robust_metrics)
+          }
         }
       }, warning = function(w) {
         warning_msg <- w$message
@@ -670,7 +657,7 @@ contest <- function(data, covariates, outcome, cv_folds = 5, verbose = TRUE,
     dplyr::mutate(
       fit_results = purrr::map2(.data$info, .data$wflow_id, ~{
         if(verbose) cat("Processing workflow:", .y, "\n")
-        safe_fit_model(.x, .y, lasso_grid, rf_grid, gbm_grid, cv_folds_obj, robust_metrics, verbose)
+        safe_fit_model(.x, .y, lasso_grid, ridge_grid, cv_folds_obj, robust_metrics, verbose)
       })
     )
 
@@ -772,19 +759,17 @@ contest <- function(data, covariates, outcome, cv_folds = 5, verbose = TRUE,
 
   # Get final model specification
   if (best_model_name %in% c("lasso_poly", "lasso_interact", "lasso_poly_interact",
-                             "random_forest", "gradient_boosting")) {
+                             "ridge", "ridge_poly", "ridge_interact", "ridge_poly_interact")) {
     best_params <- tune::select_best(best_fit_results, metric = "rsq")
     final_workflow <- tune::finalize_workflow(best_workflow, best_params)
     best_spec <- workflows::extract_spec_parsnip(final_workflow)
 
     if(verbose && "penalty" %in% names(best_params)) {
-      cat("Best lasso penalty:", best_params$penalty, "\n")
-    }
-    if(verbose && "mtry" %in% names(best_params)) {
-      cat("Best mtry:", best_params$mtry, "\n")
-    }
-    if(verbose && "learn_rate" %in% names(best_params)) {
-      cat("Best learning rate:", best_params$learn_rate, "\n")
+      if(best_model_name %in% c("lasso_poly", "lasso_interact", "lasso_poly_interact")) {
+        cat("Best lasso penalty:", best_params$penalty, "\n")
+      } else {
+        cat("Best ridge penalty:", best_params$penalty, "\n")
+      }
     }
   } else {
     final_workflow <- best_workflow
@@ -796,17 +781,18 @@ contest <- function(data, covariates, outcome, cv_folds = 5, verbose = TRUE,
   # Extract recipe if needed
   best_recipe <- NULL
   if (best_model_name %in% c("linear_poly", "linear_interact", "linear_poly_interact",
-                             "lasso_poly", "lasso_interact", "lasso_poly_interact")) {
+                             "lasso_poly", "lasso_interact", "lasso_poly_interact",
+                             "ridge_poly", "ridge_interact", "ridge_poly_interact")) {
     best_recipe <- tryCatch({
       workflows::extract_preprocessor(model_performance$info[[best_model_idx]]$workflow[[1]])
     }, error = function(e) {
       if(verbose) cat("Could not extract recipe, recreating...\n")
       # Recreate based on model name
-      if (best_model_name %in% c("linear_poly", "lasso_poly")) {
+      if (best_model_name %in% c("linear_poly", "lasso_poly", "ridge_poly")) {
         poly_recipe
-      } else if (best_model_name %in% c("linear_interact", "lasso_interact")) {
+      } else if (best_model_name %in% c("linear_interact", "lasso_interact", "ridge_interact")) {
         interact_recipe
-      } else if (best_model_name %in% c("linear_poly_interact", "lasso_poly_interact")) {
+      } else if (best_model_name %in% c("linear_poly_interact", "lasso_poly_interact", "ridge_poly_interact")) {
         poly_interact_recipe
       }
     })
@@ -866,6 +852,7 @@ contest <- function(data, covariates, outcome, cv_folds = 5, verbose = TRUE,
 
   return(contest_results)
 }
+
 #' Validate contest results for prognostic_balance integration
 #' @param contest_output Output from contest() function
 validate_contest_output <- function(contest_output) {
