@@ -345,7 +345,7 @@ adjust_se <- function(values, nsims) {
   stats::sd(values, na.rm = TRUE) * (nsims - 1) / nsims
 }
 
-#' ML model selection and cross-validation with comprehensive report - ORCHESTRATOR FUNCTION
+#' ML model selection and cross-validation wrapper
 #' @param data data.frame containing control group observations
 #' @param covariates character vector of covariate names
 #' @param outcome character name of outcome variable
@@ -624,7 +624,7 @@ tune_hyperparams <- function(data, outcome, covariates, cv_folds = 5,
   ))
 }
 
-#' Select best model based on full data performance
+#' Select best model based on control data (control data passed by pwtest)
 #' @param tuned_models output from tune_hyperparams
 #' @param data full control group data
 #' @param outcome outcome variable name
