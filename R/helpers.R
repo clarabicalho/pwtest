@@ -345,14 +345,75 @@ adjust_se <- function(values, nsims) {
   stats::sd(values, na.rm = TRUE) * (nsims - 1) / nsims
 }
 
-#' ML model selection and cross-validation for fitting prognostic-weighted difference in average potential outcomes under control with option to produce comprehensive report
+#' ML model selection and cross-validation with comprehensive report - ORCHESTRATOR FUNCTION
 #' @param data data.frame containing control group observations
 #' @param covariates character vector of covariate names
 #' @param outcome character name of outcome variable
-#' @param cv_folds integer. Number of cross-validation folds (default 5, increased from 3)
+#' @param cv_folds integer. Number of cross-validation folds (default 5)
+#' @param min_penalty_exp minimum penalty exponent (default -6)
+#' @param max_penalty_exp maximum penalty exponent (default -1)
 #' @param verbose logical. Whether to print detailed contest report
-#' @param min_penalty_exp minimum penalty exponent (default -6 for more conservative start)
-#' @param max_penalty_exp maximum penalty exponent (default -1 for small data sets)
+#' @export
+contest <- function(data, covariates, outcome, cv_folds = 5,
+                    min_penalty_exp = -6, max_penalty_exp = -1,
+                    verbose = TRUE) {
+
+  if(verbose) cat("=== CONTEST: Model Selection Pipeline ===\n")
+
+  # Step 1: Tune hyperparameters via CV
+  tuned_models <- tune_hyperparams(data = data,
+                                   outcome = outcome,
+                                   covariates = covariates,
+                                   cv_folds = cv_folds,
+                                   min_penalty_exp = min_penalty_exp,
+                                   max_penalty_exp = max_penalty_exp,
+                                   verbose = verbose)
+
+  # Step 2: Select best model based on full data performance
+  best_model <- pick_winner(tuned_models = tuned_models,
+                            data = data,
+                            outcome = outcome,
+                            covariates = covariates,
+                            formula = NULL,
+                            verbose = verbose)
+
+  if(verbose) {
+    cat("\n=== WINNER ===\n")
+    cat("Model:", best_model$best_model_name, "\n")
+    cat("CV R-squared:", round(best_model$cv_rsq, 4), "\n")
+    cat("Full data R-squared:", round(best_model$full_rsq, 4), "\n")
+  }
+
+  # Return in format compatible with existing pwtest code
+  contest_results <- list(
+    # Core model components for pwtest integration
+    best_spec = best_model$best_spec,
+    best_engine = best_model$best_engine,
+    best_recipe = best_model$best_recipe,
+
+    # Model identification and performance
+    best_model_name = best_model$best_model_name,
+    best_cv_rsq = best_model$cv_rsq,
+    best_full_data_rsq = best_model$full_rsq,
+
+    # Hyperparameters
+    best_hyperparameters = best_model$best_hyperparams,
+
+    # Add contest class for compatibility
+    class = c("contest_results", "list")
+  )
+
+  return(contest_results)
+}
+
+#' Tune hyperparameters via cross-validation
+#' @param data data.frame containing control group observations
+#' @param covariates character vector of covariate names
+#' @param outcome character name of outcome variable
+#' @param cv_folds integer. Number of cross-validation folds (default 5)
+#' @param min_penalty_exp minimum penalty exponent
+#' @param max_penalty_exp maximum penalty exponent
+#' @param verbose logical. Whether to print detailed information
 #' @importFrom rlang .data
 #' @importFrom tibble tibble
 #' @importFrom dplyr select mutate filter arrange desc semi_join pull
@@ -368,76 +429,34 @@ adjust_se <- function(values, nsims) {
 #' @importFrom dials grid_regular penalty mtry trees learn_rate
 #' @importFrom scales log10_trans
 #' @importFrom yardstick metric_set rmse rsq
-#' @export
-contest <- function(data, covariates, outcome, cv_folds = 5, verbose = TRUE,
-                    min_penalty_exp = -6, max_penalty_exp = -1) {
+tune_hyperparams <- function(data, outcome, covariates, cv_folds = 5,
+                             min_penalty_exp = -6, max_penalty_exp = -1,
+                             verbose = TRUE) {
 
-  if(verbose) cat("=== CONTEST FUNCTION REPORT ===\n")
+  if(verbose) cat("\n-- Step 1: Hyperparameter Tuning via Cross-Validation --\n")
 
-  # Step 1: Data Diagnostics
+  # Data diagnostics
   analysis_data <- data %>% tidyr::drop_na()
 
   if(verbose) {
-    cat("\n-- Step 1:  Data  Diagnostics --\n")
-    cat("Original data dimensions:", nrow(data), "x", ncol(data), "\n")
-    cat("Analysis data dimensions:", nrow(analysis_data), "x", ncol(analysis_data), "\n")
-    cat("Outcome variable:", outcome, "\n")
+    cat("Data dimensions:", nrow(analysis_data), "x", ncol(analysis_data), "\n")
     cat("Outcome variance:", stats::var(analysis_data[[outcome]], na.rm = TRUE), "\n")
-    cat("Outcome range:", paste(range(analysis_data[[outcome]], na.rm = TRUE), collapse = " to "), "\n")
-
-    cat("\nCovariate summary:\n")
-    cov_summary <- analysis_data[, covariates] %>%
-      dplyr::summarise_all(list(
-        n_unique = ~length(unique(.)),
-        variance = ~stats::var(., na.rm = TRUE),
-        range_width = ~diff(range(., na.rm = TRUE))
-      ))
-    print(cov_summary)
-
-    # Check for problematic variables
-    constant_vars <- sapply(analysis_data[, covariates], function(x) length(unique(x)) == 1)
-    if(any(constant_vars)) {
-      cat("WARNING: Constant variables detected:", paste(names(constant_vars)[constant_vars], collapse = ", "), "\n")
-    }
   }
 
   if (nrow(analysis_data) < cv_folds) {
     stop("Insufficient data for cross-validation. Need at least ", cv_folds, " observations, got ", nrow(analysis_data))
   }
 
-  # Step 2: Cross-validation and Diagnostics
+  # Cross-validation setup
   cv_folds_obj <- rsample::vfold_cv(analysis_data, v = cv_folds, strata = NULL)
 
-  if(verbose) {
-    cat("\n-- Step 2: Cross-validation Diagnostics --\n")
-    fold_sizes <- purrr::map_dbl(cv_folds_obj$splits, function(split) nrow(rsample::assessment(split)))
-    fold_train_sizes <- purrr::map_dbl(cv_folds_obj$splits, function(split) nrow(rsample::analysis(split)))
-
-    cat("CV folds:", cv_folds, "\n")
-    cat("Assessment (validation) fold sizes:", paste(fold_sizes, collapse = ", "), "\n")
-    cat("Training fold sizes:", paste(fold_train_sizes, collapse = ", "), "\n")
-    cat("Min assessment fold size:", min(fold_sizes), "\n")
-
-    if (min(fold_sizes) < 10) {
-      cat("WARNING: Very small CV folds detected. Consider reducing cv_folds.\n")
-    }
-
-    # Test outcome variance in folds
-    fold_outcome_vars <- purrr::map_dbl(cv_folds_obj$splits, function(split) {
-      fold_data <- rsample::analysis(split)
-      stats::var(fold_data[[outcome]], na.rm = TRUE)
-    })
-    cat("Outcome variance in training folds:", paste(round(fold_outcome_vars, 4), collapse = ", "), "\n")
-  }
-
-  # Step 3: Recipe Creation and Diagnostics
+  # Recipe creation
   base_recipe <- recipes::recipe(stats::as.formula(paste(outcome, "~ .")), data = analysis_data)
 
-  # Creates recipes
   poly_recipe <- base_recipe %>%
     recipes::step_normalize(recipes::all_predictors()) %>%
     recipes::step_poly(recipes::all_predictors(), degree = 2) %>%
-    recipes::step_corr(recipes::all_predictors(), threshold = 0.99) #Removes duplicate cols
+    recipes::step_corr(recipes::all_predictors(), threshold = 0.99)
 
   interact_recipe <- base_recipe %>%
     recipes::step_normalize(recipes::all_predictors()) %>%
@@ -450,72 +469,17 @@ contest <- function(data, covariates, outcome, cv_folds = 5, verbose = TRUE,
     recipes::step_interact(terms = ~ recipes::all_predictors():recipes::all_predictors()) %>%
     recipes::step_corr(recipes::all_predictors(), threshold = 0.99)
 
-  if(verbose) {
-    cat("\n-- Step 3: Recipe Diagnostics --\n")
-
-    # Test recipe preprocessing
-    tryCatch({
-      poly_prepped <- recipes::prep(poly_recipe, training = analysis_data)
-      poly_baked <- recipes::bake(poly_prepped, new_data = NULL)
-      cat("Base features:", length(covariates), "\n")
-      cat("Features after poly recipe:", ncol(poly_baked) - 1, "\n")
-
-      # Check for remaining issues
-      feature_vars <- sapply(poly_baked[, -which(names(poly_baked) == outcome)], stats::var, na.rm = TRUE)
-      n_zero_var <- sum(feature_vars == 0, na.rm = TRUE)
-      if(n_zero_var > 0) {
-        cat("WARNING: Features with zero variance after preprocessing:", n_zero_var, "\n")
-      }
-
-      # Check correlation matrix
-      cor_matrix <- stats::cor(poly_baked[, -which(names(poly_baked) == outcome)], use = "complete.obs")
-      max_cor <- max(abs(cor_matrix[upper.tri(cor_matrix)]), na.rm = TRUE)
-      cat("Max correlation after step_corr:", round(max_cor, 4), "\n")
-
-      # Test other recipes
-      interact_prepped <- recipes::prep(interact_recipe, training = analysis_data)
-      interact_baked <- recipes::bake(interact_prepped, new_data = NULL)
-      cat("Features after interact recipe:", ncol(interact_baked) - 1, "\n")
-
-      poly_interact_prepped <- recipes::prep(poly_interact_recipe, training = analysis_data)
-      poly_interact_baked <- recipes::bake(poly_interact_prepped, new_data = NULL)
-      cat("Features after poly_interact recipe:", ncol(poly_interact_baked) - 1, "\n")
-
-    }, error = function(e) {
-      cat("ERROR in recipe preprocessing:", e$message, "\n")
-    })
-  }
-
-  # Step 4: Model Specs
+  # Model specifications
   linear_spec <- parsnip::linear_reg() %>% parsnip::set_engine("lm")
 
-  # Create more conservative lasso penalty grid based on dataset size
-  n_obs <- nrow(analysis_data)
-  n_features_base <- length(covariates)
-
-  if(verbose) {
-    cat("\n-- Step 4: Lasso Tuning --\n")
-    cat("Sample size:", n_obs, "\n")
-    cat("Base features:", n_features_base, "\n")
-  }
-
-  # More conservative penalty grid
   lasso_grid <- dials::grid_regular(
     dials::penalty(range = c(min_penalty_exp, max_penalty_exp), trans = scales::log10_trans()),
     levels = 15
   )
 
-  if(verbose) {
-    cat("Lasso penalty range: 10^", min_penalty_exp, " to 10^", max_penalty_exp, "\n")
-    cat("Penalty grid points:", nrow(lasso_grid), "\n")
-    cat("Sample penalties:", paste(signif(lasso_grid$penalty[1:5], 3), collapse = ", "), "...\n")
-    cat("Penalty range:", paste(signif(range(lasso_grid$penalty), 3), collapse = " to "), "\n")
-  }
-
   lasso_spec <- parsnip::linear_reg(penalty = tune::tune(), mixture = 1) %>%
     parsnip::set_engine("glmnet")
 
-  # Tree model grids
   rf_grid <- dials::grid_regular(
     dials::mtry(range = c(1, min(length(covariates), 5))),
     dials::trees(range = c(50, 200)),
@@ -537,7 +501,7 @@ contest <- function(data, covariates, outcome, cv_folds = 5, verbose = TRUE,
     parsnip::set_engine("xgboost") %>%
     parsnip::set_mode("regression")
 
-  # Step 5: Workflows
+  # Create workflows
   targeted_workflows <- tibble::tibble(
     wflow_id = c("linear", "linear_poly", "linear_interact", "linear_poly_interact",
                  "lasso_poly", "lasso_interact", "lasso_poly_interact",
@@ -555,322 +519,192 @@ contest <- function(data, covariates, outcome, cv_folds = 5, verbose = TRUE,
     )
   )
 
-  # Use robust metrics
   robust_metrics <- yardstick::metric_set(yardstick::rmse, yardstick::rsq)
 
-  # Step 6: Model Fitting
-  if(verbose) {
-    cat("\n-- Step 6: Model Fitting --\n")
-    cat("Models to fit:", paste(targeted_workflows$wflow_id, collapse = ", "), "\n")
-    cat("Number of workflows created:", nrow(targeted_workflows), "\n")
-  }
+  # Fit all models with CV
+  if(verbose) cat("\n-- Step 2: Fitting Models with Cross-Validation --\n")
 
-  # Validate all workflows were created properly
-  if(verbose) {
-    cat("Validating workflow creation...\n")
-    for(i in 1:nrow(targeted_workflows)) {
-      wf_name <- targeted_workflows$wflow_id[i]
-      wf_obj <- targeted_workflows$info[[i]]$workflow[[1]]
-      tryCatch({
-        model_spec <- workflows::extract_spec_parsnip(wf_obj)
-        cat("  ", wf_name, "- Model:", class(model_spec)[1], "check\n")
-      }, error = function(e) {
-        cat("  ", wf_name, "- ERROR in workflow creation:", e$message, "\n")
-      })
-    }
-  }
-
-  # Fitting function with detailed error capture
   safe_fit_model <- function(wf_info, wf_name, lasso_grid, rf_grid, gbm_grid, cv_folds_obj, robust_metrics, verbose) {
     wf <- wf_info$workflow[[1]]
 
     if(verbose) cat("Fitting model:", wf_name, "\n")
 
-    # Track warnings and errors
-    warnings_captured <- character(0)
-    errors_captured <- character(0)
-
     result <- tryCatch({
-      withCallingHandlers({
-        if (wf_name %in% c("linear", "linear_poly", "linear_interact", "linear_poly_interact")) {
-          # No tuning needed for linear model
-          tune::fit_resamples(wf, resamples = cv_folds_obj, metrics = robust_metrics)
-        } else if (wf_name %in% c("lasso_poly", "lasso_interact", "lasso_poly_interact")) {
-          # Test single penalty first
-          if(verbose) {
-            cat("  Testing single penalty value first...\n")
-            test_wf <- wf %>% tune::finalize_workflow(tibble::tibble(penalty = 0.01))
-            test_fit <- tryCatch({
-              parsnip::fit(test_wf, data = analysis_data)
-            }, error = function(e) {
-              cat("  ERROR in single penalty test:", e$message, "\n")
-              return(NULL)
-            })
-
-            if(!is.null(test_fit)) {
-              test_preds <- stats::predict(test_fit, analysis_data)
-              pred_var <- stats::var(test_preds$.pred, na.rm = TRUE)
-              pred_range <- range(test_preds$.pred, na.rm = TRUE)
-              cat("  Single penalty test - Prediction variance:", round(pred_var, 6),
-                  "Range:", paste(round(pred_range, 4), collapse = " to "), "\n")
-
-              if(pred_var < 1e-10) {
-                cat("  WARNING: Near-constant predictions detected\n")
-              }
-            }
-          }
-
-          # Tune with grid
-          tune::tune_grid(wf, resamples = cv_folds_obj, grid = lasso_grid, metrics = robust_metrics)
-        } else if (wf_name == "random_forest") {
-          tune::tune_grid(wf, resamples = cv_folds_obj, grid = rf_grid, metrics = robust_metrics)
-        } else if (wf_name == "gradient_boosting") {
-          tune::tune_grid(wf, resamples = cv_folds_obj, grid = gbm_grid, metrics = robust_metrics)
-        }
-      }, warning = function(w) {
-        warning_msg <- w$message
-        warnings_captured <<- c(warnings_captured, warning_msg)
-
-        if(verbose) {
-          if (grepl("correlation computation is required", warning_msg)) {
-            cat("  WARNING: Constant predictions detected (over-regularized)\n")
-          } else if (grepl("prediction from rank-deficient fit", warning_msg)) {
-            cat("  WARNING: Rank deficient fit (feature explosion)\n")
-          } else {
-            cat("  WARNING:", warning_msg, "\n")
-          }
-        }
-        invokeRestart("muffleWarning")
-      })
+      if (wf_name %in% c("linear", "linear_poly", "linear_interact", "linear_poly_interact")) {
+        tune::fit_resamples(wf, resamples = cv_folds_obj, metrics = robust_metrics)
+      } else if (wf_name %in% c("lasso_poly", "lasso_interact", "lasso_poly_interact")) {
+        tune::tune_grid(wf, resamples = cv_folds_obj, grid = lasso_grid, metrics = robust_metrics)
+      } else if (wf_name == "random_forest") {
+        tune::tune_grid(wf, resamples = cv_folds_obj, grid = rf_grid, metrics = robust_metrics)
+      } else if (wf_name == "gradient_boosting") {
+        tune::tune_grid(wf, resamples = cv_folds_obj, grid = gbm_grid, metrics = robust_metrics)
+      }
     }, error = function(e) {
-      errors_captured <<- c(errors_captured, e$message)
       if(verbose) cat("  ERROR:", e$message, "\n")
       return(NULL)
     })
 
-    # Attach diagnostic info
-    if(!is.null(result)) {
-      attr(result, "warnings") <- warnings_captured
-      attr(result, "errors") <- errors_captured
-    }
-
-    if(verbose) {
-      if(is.null(result)) {
-        cat("  FAILED:", wf_name, "\n")
-      } else {
-        cat("  SUCCESS:", wf_name, "- Warnings:", length(warnings_captured), "Errors:", length(errors_captured), "\n")
-      }
-    }
-
     return(result)
   }
 
-  # Fit all models - FIXED: Using .data$ for global variables
   results <- targeted_workflows %>%
     dplyr::mutate(
       fit_results = purrr::map2(.data$info, .data$wflow_id, ~{
-        if(verbose) cat("Processing workflow:", .y, "\n")
         safe_fit_model(.x, .y, lasso_grid, rf_grid, gbm_grid, cv_folds_obj, robust_metrics, verbose)
       })
     )
 
-  if(verbose) {
-    cat("Completed fitting. Results summary:\n")
-    results_summary <- results %>%
-      dplyr::mutate(
-        fit_success = purrr::map_lgl(.data$fit_results, ~!is.null(.x))
-      ) %>%
-      dplyr::select(.data$wflow_id, .data$fit_success)
-    print(results_summary)
-  }
-
-  # Step 7: Get results
-  if(verbose) cat("\n-- Step 7: Results --\n")
-
-  model_performance <- results %>%
+  # Extract hyperparameters and create tuned model specifications
+  tuned_models <- results %>%
     dplyr::mutate(
-      model_warnings = purrr::map_chr(.data$fit_results, function(x) {
-        if (is.null(x)) return("failed")
-        warnings <- attr(x, "warnings")
-        if (is.null(warnings) || length(warnings) == 0) return("none")
-        return(paste(length(warnings), "warnings"))
-      }),
+      tuned_info = purrr::map2(.data$wflow_id, .data$fit_results, function(id, fit_result) {
+        if (is.null(fit_result)) return(NULL)
 
-      best_rmse = purrr::map_dbl(.data$fit_results, function(x) {
-        if (is.null(x)) return(Inf)
+        # Get workflow
+        wf <- targeted_workflows %>%
+          dplyr::filter(wflow_id == id) %>%
+          dplyr::pull(info) %>%
+          .[[1]] %>%
+          .$workflow[[1]]
 
-        tryCatch({
-          metrics <- tune::collect_metrics(x)
-          if ("penalty" %in% names(metrics) || "mtry" %in% names(metrics)) {
-            # Tuned model - select best based on rsq
-            best_params <- tune::select_best(x, metric = "rsq")
-            metrics %>%
-              dplyr::semi_join(best_params, by = intersect(names(metrics), names(best_params))) %>%
-              dplyr::filter(.data$.metric == "rmse") %>%
-              dplyr::pull(.data$mean)
-          } else {
-            # Non-tuned model
-            metrics %>%
-              dplyr::filter(.data$.metric == "rmse") %>%
-              dplyr::pull(.data$mean)
-          }
-        }, error = function(e) {
-          if(verbose) cat("Error extracting RMSE for model:", e$message, "\n")
-          return(Inf)
-        })
-      }),
+        # Extract metrics
+        metrics <- tune::collect_metrics(fit_result)
 
-      best_rsq = purrr::map_dbl(.data$fit_results, function(x) {
-        if (is.null(x)) return(0)
+        if (id %in% c("lasso_poly", "lasso_interact", "lasso_poly_interact",
+                      "random_forest", "gradient_boosting")) {
+          # Get best hyperparameters
+          best_params <- tune::select_best(fit_result, metric = "rsq")
 
-        tryCatch({
-          metrics <- tune::collect_metrics(x)
-          if ("penalty" %in% names(metrics) || "mtry" %in% names(metrics)) {
-            # Tuned model
-            best_params <- tune::select_best(x, metric = "rsq")
-            metrics %>%
-              dplyr::semi_join(best_params, by = intersect(names(metrics), names(best_params))) %>%
-              dplyr::filter(.data$.metric == "rsq") %>%
-              dplyr::pull(.data$mean)
-          } else {
-            # Non-tuned model
-            metrics %>%
-              dplyr::filter(.data$.metric == "rsq") %>%
-              dplyr::pull(.data$mean)
-          }
-        }, error = function(e) {
-          if(verbose) cat("Error extracting R-squared for model:", e$message, "\n")
-          return(0)
-        })
+          # Finalize workflow with best hyperparameters
+          final_wf <- tune::finalize_workflow(wf, best_params)
+
+          # Extract components
+          best_spec <- workflows::extract_spec_parsnip(final_wf)
+          best_recipe <- workflows::extract_preprocessor(final_wf)
+
+          cv_rsq <- metrics %>%
+            dplyr::semi_join(best_params, by = intersect(names(metrics), names(best_params))) %>%
+            dplyr::filter(.data$.metric == "rsq") %>%
+            dplyr::pull(.data$mean)
+
+          return(list(
+            spec = best_spec,
+            recipe = best_recipe,
+            engine = best_spec$engine,
+            hyperparams = best_params,
+            cv_rsq = cv_rsq,
+            wflow_id = id
+          ))
+        } else {
+          # No hyperparameters to tune
+          best_spec <- workflows::extract_spec_parsnip(wf)
+          best_recipe <- workflows::extract_preprocessor(wf)
+
+          cv_rsq <- metrics %>%
+            dplyr::filter(.data$.metric == "rsq") %>%
+            dplyr::pull(.data$mean)
+
+          return(list(
+            spec = best_spec,
+            recipe = best_recipe,
+            engine = best_spec$engine,
+            hyperparams = NULL,
+            cv_rsq = cv_rsq,
+            wflow_id = id
+          ))
+        }
       })
     )
 
-  if(verbose) {
-    cat("\nModel Performance Summary:\n")
-    perf_summary <- model_performance %>%
-      dplyr::select(.data$wflow_id, .data$best_rmse, .data$best_rsq, .data$model_warnings) %>%
-      dplyr::arrange(dplyr::desc(.data$best_rsq))
-    print(perf_summary)
-  }
-
-  # Select best model
-  best_model_idx <- which.max(model_performance$best_rsq)
-
-  if (all(model_performance$best_rsq == 0)) {
-    stop("All models failed to fit. Check data for constant variables, perfect collinearity, or insufficient variation.")
-  }
-
-  best_model_name <- model_performance$wflow_id[best_model_idx]
-  best_workflow <- model_performance$info[[best_model_idx]]$workflow[[1]]
-  best_fit_results <- model_performance$fit_results[[best_model_idx]]
-
-  if(verbose) {
-    cat("\nBest model:", best_model_name, "\n")
-    cat("Best R-squared:", round(model_performance$best_rsq[best_model_idx], 4), "\n")
-    cat("Best RMSE:", round(model_performance$best_rmse[best_model_idx], 4), "\n")
-  }
-
-  # Get final model specification
-  if (best_model_name %in% c("lasso_poly", "lasso_interact", "lasso_poly_interact",
-                             "random_forest", "gradient_boosting")) {
-    best_params <- tune::select_best(best_fit_results, metric = "rsq")
-    final_workflow <- tune::finalize_workflow(best_workflow, best_params)
-    best_spec <- workflows::extract_spec_parsnip(final_workflow)
-
-    if(verbose && "penalty" %in% names(best_params)) {
-      cat("Best lasso penalty:", best_params$penalty, "\n")
-    }
-    if(verbose && "mtry" %in% names(best_params)) {
-      cat("Best mtry:", best_params$mtry, "\n")
-    }
-    if(verbose && "learn_rate" %in% names(best_params)) {
-      cat("Best learning rate:", best_params$learn_rate, "\n")
-    }
-  } else {
-    final_workflow <- best_workflow
-    best_spec <- workflows::extract_spec_parsnip(final_workflow)
-  }
-
-  best_engine <- best_spec$engine
-
-  # Extract recipe if needed
-  best_recipe <- NULL
-  if (best_model_name %in% c("linear_poly", "linear_interact", "linear_poly_interact",
-                             "lasso_poly", "lasso_interact", "lasso_poly_interact")) {
-    best_recipe <- tryCatch({
-      workflows::extract_preprocessor(model_performance$info[[best_model_idx]]$workflow[[1]])
-    }, error = function(e) {
-      if(verbose) cat("Could not extract recipe, recreating...\n")
-      # Recreate based on model name
-      if (best_model_name %in% c("linear_poly", "lasso_poly")) {
-        poly_recipe
-      } else if (best_model_name %in% c("linear_interact", "lasso_interact")) {
-        interact_recipe
-      } else if (best_model_name %in% c("linear_poly_interact", "lasso_poly_interact")) {
-        poly_interact_recipe
-      }
-    })
-  }
-
-  # Get linear baseline performance for comparison
-  linear_idx <- which(model_performance$wflow_id == "linear")
-  if (length(linear_idx) > 0 && model_performance$best_rsq[linear_idx] != 0) {
-    linear_cv_rmse <- model_performance$best_rmse[linear_idx]
-    linear_cv_rsq <- model_performance$best_rsq[linear_idx]
-  } else {
-    # Fallback if linear model failed
-    linear_cv_rmse <- model_performance$best_rmse[best_model_idx]
-    linear_cv_rsq <- model_performance$best_rsq[best_model_idx]
-  }
-
-  # Return comprehensive results object compatible with wrapper
-  contest_results <- list(
-    # Core model components for pwtest() integration
-    best_spec = best_spec,
-    best_engine = best_engine,
-    best_recipe = best_recipe,
-
-    # Model identification and performance
-    best_model_name = best_model_name,
-    best_cv_rmse = model_performance$best_rmse[best_model_idx],
-    best_cv_rsq = model_performance$best_rsq[best_model_idx],
-
-    # Linear baseline for comparison
-    linear_cv_rmse = linear_cv_rmse,
-    linear_cv_rsq = linear_cv_rsq,
-
-    # Diagnostics and report
-    verbose_info = if(verbose) {
-      list(
-        data_summary = list(
-          n_obs = nrow(analysis_data),
-          n_features = length(covariates),
-          outcome_var = stats::var(analysis_data[[outcome]], na.rm = TRUE)
-        ),
-        cv_info = list(
-          n_folds = cv_folds,
-          min_fold_size = min(purrr::map_dbl(cv_folds_obj$splits, ~nrow(rsample::assessment(.x))))
-        ),
-        penalty_grid = lasso_grid
-      )
-    } else NULL,
-
-    # Complete model performance for advanced users
-    all_model_performance = model_performance %>%
-      dplyr::select(.data$wflow_id, .data$best_rmse, .data$best_rsq, .data$model_warnings) %>%
-      dplyr::arrange(dplyr::desc(.data$best_rsq))
-  )
-
-  # Add contest class for method dispatch if needed
-  class(contest_results) <- c("contest_results", "list")
-
-  return(contest_results)
+  # Return all tuned models
+  return(list(
+    tuned_models = tuned_models,
+    grids = list(lasso = lasso_grid, rf = rf_grid, gbm = gbm_grid),
+    cv_folds = cv_folds
+  ))
 }
+
+#' Select best model based on full data performance
+#' @param tuned_models output from tune_hyperparams
+#' @param data full control group data
+#' @param outcome outcome variable name
+#' @param covariates covariate names
+#' @param formula model formula (optional)
+#' @param verbose whether to print diagnostics
+pick_winner <- function(tuned_models, data, outcome, covariates, formula = NULL, verbose = TRUE) {
+
+  if(is.null(formula)) formula <- as.formula(paste0(outcome, "~."))
+
+  if(verbose) cat("\n-- Step 3: Evaluating Models on Full Control Data --\n")
+
+  # Prepare data
+  analysis_data <- data %>% tidyr::drop_na()
+
+  # Evaluate each model on full dataset
+  performance <- tuned_models$tuned_models %>%
+    dplyr::filter(!sapply(.data$tuned_info, is.null)) %>%
+    dplyr::mutate(
+      full_fit = purrr::map(.data$tuned_info, function(model_info) {
+        if(verbose) cat("Evaluating", model_info$wflow_id, "on full data... ")
+
+        tryCatch({
+          # Create workflow with recipe and model
+          wf <- workflows::workflow() %>%
+            workflows::add_recipe(model_info$recipe) %>%
+            workflows::add_model(model_info$spec)
+
+          # Fit on full data
+          fit <- parsnip::fit(wf, data = analysis_data)
+
+          if(verbose) cat("Success\n")
+          return(fit)
+        }, error = function(e) {
+          if(verbose) cat("ERROR:", e$message, "\n")
+          return(NULL)
+        })
+      }),
+
+      full_rsq = purrr::map_dbl(.data$full_fit, function(fit) {
+        if(is.null(fit)) return(0)
+
+        tryCatch({
+          preds <- predict(fit, analysis_data)
+          actual <- analysis_data[[outcome]]
+          yardstick::rsq_vec(actual, preds$.pred)
+        }, error = function(e) 0)
+      })
+    )
+
+  # Select best based on full data R²
+  best_idx <- which.max(performance$full_rsq)
+
+  if(verbose) {
+    cat("\nModel performance comparison:\n")
+    performance %>%
+      dplyr::mutate(cv_rsq = sapply(.data$tuned_info, function(x) x$cv_rsq)) %>%
+      dplyr::select(.data$wflow_id, .data$cv_rsq, .data$full_rsq) %>%
+      dplyr::arrange(dplyr::desc(.data$full_rsq)) %>%
+      print()
+  }
+
+  best_model_info <- performance$tuned_info[[best_idx]]
+
+  return(list(
+    best_spec = best_model_info$spec,
+    best_engine = best_model_info$engine,
+    best_recipe = best_model_info$recipe,
+    best_hyperparams = best_model_info$hyperparams,
+    best_model_name = best_model_info$wflow_id,
+    cv_rsq = best_model_info$cv_rsq,
+    full_rsq = performance$full_rsq[best_idx]
+  ))
+}
+
 #' Validate contest results for prognostic_balance integration
 #' @param contest_output Output from contest() function
 validate_contest_output <- function(contest_output) {
   required_components <- c("best_spec", "best_engine", "best_model_name",
-                           "best_cv_rsq", "linear_cv_rsq")
+                           "best_cv_rsq", "best_full_data_rsq")
 
   missing_components <- setdiff(required_components, names(contest_output))
 
@@ -882,10 +716,6 @@ validate_contest_output <- function(contest_output) {
   # Additional validation
   if (is.null(contest_output$best_spec)) {
     stop("Contest failed to identify a valid model specification")
-  }
-
-  if (contest_output$best_cv_rsq <= 0) {
-    warning("Contest winner has very low predictive performance (R-squared <= 0)")
   }
 
   return(TRUE)

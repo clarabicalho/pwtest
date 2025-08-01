@@ -78,14 +78,14 @@ pwtest <- function(data,
   # run cross validation (cv_auto = TRUE) -------------------
   if(cv_auto){
     # pass on arguments from parent function
-    argg_contest <- c(argg[names(argg) %in% names(formals(pick_winner))])
+    argg_contest <- c(argg[names(argg) %in% names(formals(contest))])
     argg_contest$data <- control_data
 
-    # pick winner and output model specs
-    winner <- do.call(pick_winner, argg_contest)
-    model_spec <- winner$model_spec
-    engine <- winner$engine
-    # argg$recipe <- winner$recipe
+    # run contest to get best model based on full control data performance
+    winner <- do.call(contest, argg_contest)
+    model_spec <- winner$best_spec
+    engine <- winner$best_engine
+    # argg$recipe <- winner$best_recipe  # May need this later for recipe-based models
   }
 
   # observed statistics -------------------------------------
@@ -99,13 +99,20 @@ pwtest <- function(data,
   datc <- data[control_i, c(outcome, covariates)]
   # data to predict Yt(0)
   datt <- data[treat_i, c(outcome, covariates)]
+
+  # Fit model on control group
   fit_Yc <- model_spec %>% fit(formula = formula, data = datc)
+
   # extract standard metrics
   fit_metrics <- predict(fit_Yc, datc) %>%
     bind_cols(Y = as.vector(datc$Y)) %>% yardstick::metrics(Y, .pred)
-  predict_Yt <-  predict(fit_Yc, datt)
-  # observed \overline{\widehat{Y^T(0)}} - \overline{Y^C(0)}
-  pwdelta_obs <-  mean(predict_Yt$.pred) - mean(datc$Y)
+
+  # Get fitted values for BOTH groups
+  predict_Yc <- predict(fit_Yc, datc)  # Fitted Y(0) for control
+  predict_Yt <- predict(fit_Yc, datt)  # Fitted Y(0) for treatment
+
+  # observed \overline{\widehat{Y^T(0)}} - \overline{\widehat{Y^C(0)}}
+  pwdelta_obs <- mean(predict_Yt$.pred) - mean(predict_Yc$.pred)
 
   # bootstrapping -------------------------------------
 
@@ -120,11 +127,27 @@ pwtest <- function(data,
     bsample <- data_stdc[z, ]
     bsample[[treatment]][1:length(treat_i)] <- 1
 
-    predict_Yc <- predict(fit_Yc, bsample[bsample[[treatment]] == 0, ])
-    predict_Yt <-  predict(fit_Yc, bsample[bsample[[treatment]] == 1, ])
-    dY <- mean(predict_Yt$.pred) - mean(predict_Yc$.pred)
+    # Extract bootstrap control and treatment groups
+    bsample_control <- bsample[bsample[[treatment]] == 0, c(outcome, covariates)]
+    bsample_treat <- bsample[bsample[[treatment]] == 1, c(outcome, covariates)]
 
-    return(list(pwdelta=dY))
+    # REFIT model on bootstrap control data (with fixed hyperparameters)
+    tryCatch({
+      fit_b <- model_spec %>% fit(formula = formula, data = bsample_control)
+
+      # Get FITTED values for both groups
+      predict_Yc <- predict(fit_b, bsample_control)  # Fitted Y(0) for control
+      predict_Yt <- predict(fit_b, bsample_treat)    # Fitted Y(0) for treatment
+
+      # Test statistic: difference in fitted values
+      dY <- mean(predict_Yt$.pred) - mean(predict_Yc$.pred)
+
+      return(list(pwdelta = dY))
+
+    }, error = function(e) {
+      # Return NA if fitting fails (important for complex ML models)
+      return(list(pwdelta = NA))
+    })
   })
 
   # check for completeness and draw additional bootstrap samples if necessary
@@ -133,16 +156,32 @@ pwtest <- function(data,
   while (nc_bootstraps < as.integer(n_bootstraps)) {
     add_samples <- get_bootstrap_samples(control_i, length(treat_i), n_bootstraps-nc_bootstraps)
 
-    # obtain delta distribution from bootstrap samples
+    # obtain delta distribution from additional bootstrap samples
     add_bstats <- apply(add_samples, 2, function(z) {
       bsample <- data_stdc[z, ]
       bsample[[treatment]][1:length(treat_i)] <- 1
 
-      predict_Yc <- predict(fit_Yc, bsample[bsample[[treatment]] == 0, ])
-      predict_Yt <-  predict(fit_Yc, bsample[bsample[[treatment]] == 1, ])
-      dY <- mean(predict_Yt$.pred) - mean(predict_Yc$.pred)
+      # Extract bootstrap control and treatment groups
+      bsample_control <- bsample[bsample[[treatment]] == 0, c(outcome, covariates)]
+      bsample_treat <- bsample[bsample[[treatment]] == 1, c(outcome, covariates)]
 
-      return(list(pwdelta=dY))
+      # REFIT model on bootstrap control data (with fixed hyperparameters)
+      tryCatch({
+        fit_b <- model_spec %>% fit(formula = formula, data = bsample_control)
+
+        # Get FITTED values for both groups
+        predict_Yc <- predict(fit_b, bsample_control)  # Fitted Y(0) for control
+        predict_Yt <- predict(fit_b, bsample_treat)    # Fitted Y(0) for treatment
+
+        # Test statistic: difference in fitted values
+        dY <- mean(predict_Yt$.pred) - mean(predict_Yc$.pred)
+
+        return(list(pwdelta = dY))
+
+      }, error = function(e) {
+        # Return NA if fitting fails
+        return(list(pwdelta = NA))
+      })
     })
 
     bstats <- c(bstats, add_bstats)
@@ -223,50 +262,4 @@ pwtest <- function(data,
   }
 
   return(estimates)
-}
-
-#' High-level wrapper for prognostic balance testing with automatic model selection
-#' @param data data.frame containing covariates and outcome variable and subset to control group units
-#' @param covariates character vector of names of placebo variables
-#' @param outcome name of outcome variable
-#' @param cv_folds integer. Number of cross-validation folds (see `?contest()`)
-#' @param min_penalty_exp minimum penalty exponent (default -6 for more conservative start)
-#' @param max_penalty_exp maximum penalty exponent (default -1 for small data sets)
-#' @param verbose logical. Whether to print detailed information during contests (see `?contest()`)
-#' @export
-pick_winner <- function(data,
-                        outcome,
-                        covariates,
-                        cv_folds = 5,
-                        min_penalty_exp = -1,
-                        max_penalty_exp = 6,
-                        verbose = FALSE) {
-
-  ###########################################################################
-  # AUTO MODE: Contest selection
-  ###########################################################################
-
-  argg <- as.list(match.call())[-1]
-
-  # Run contest
-  if (verbose) cat("=== Model selection diagnostics ===\n")
-  contest_results <- do.call(contest, argg)
-
-  if (!verbose) {
-    cat("Contest selected:", contest_results$best_model_name,
-        "(R-squared = ", round(contest_results$best_cv_rsq, 4), ")\n")
-  }
-
-  # Prepare pwtest with contest winner
-  model_spec <- contest_results$best_spec
-  engine <- contest_results$best_engine
-  if (!is.null(contest_results$best_recipe)) {
-    recipe <- contest_results$best_recipe
-  }
-
-  if (verbose) cat("\n--- Returning contest winner ---\n")
-
-  # Return pwtest result directly
-  return(list(model_spec = model_spec, engine = engine, recipe = recipe))
-
 }
