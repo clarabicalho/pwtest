@@ -10,7 +10,7 @@ pwtest(
   treatment = "Z",
   outcome = "Y",
   n_bootstraps = 500,
-  model_spec = linear_reg(mode = "regression", engine = "lm"),
+  model_spec = NULL,
   engine = NULL,
   formula = NULL,
   cv_auto = FALSE,

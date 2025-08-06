@@ -21,7 +21,7 @@ pwtest <- function(data,
                    treatment = "Z",
                    outcome = "Y",
                    n_bootstraps = 500, # in models other than lm, the bootstrap sample also defines the training sample
-                   model_spec = linear_reg(mode = "regression", engine = "lm"),
+                   model_spec = NULL,
                    engine = NULL,
                    formula = NULL,
                    cv_auto = FALSE,
@@ -31,7 +31,7 @@ pwtest <- function(data,
   if(cv_auto & !is.null(model_spec)) {
     warning("Argument `model_spec` will be overwritten by contest winner since `cv_auto = TRUE`. To use a specific model, set `cv_auto = FALSE`.")
   }
-  if(!cv_auto & (is.null(model_spec) | all(class(model_spec) != "model_spec"))) {
+  if(!cv_auto & (!is.null(model_spec) & all(class(model_spec) != "model_spec"))) {
     stop("Argument `model_spec` must be an object of class `model_spec` from package `parsnip`. See https://www.tidymodels.org/find/parsnip/#models for more details.")
   }
   if(!is.null(formula)){
@@ -68,8 +68,7 @@ pwtest <- function(data,
 
   # restrict data to variables of interest
   data <- data[,c(treatment, covariates, outcome)]
-  data <- tidyr::drop_na(data)
-
+  # index control and treatment rows
   treat_i <- which(data[[treatment]] == 1)
   control_i <- which(data[[treatment]] == 0)
 
@@ -91,103 +90,137 @@ pwtest <- function(data,
     argg$recipe <- winner$recipe
   }
 
+
   # observed statistics -------------------------------------
 
-  # standardize data relative to entire study group (finite population)
-  data <- data %>%
-    mutate_at(.vars = c(outcome, covariates),
-              .funs = scale) %>% as.data.frame()
+  # standardize data relative to control group SD
+  data <- std_data(data, c(outcome, covariates), treatment)
 
-  # data to fit Yc(0)
-  datc <- data[control_i, c(outcome, covariates)]
-  # data to predict Yt(0)
-  datt <- data[treat_i, c(outcome, covariates)]
-  fit_Yc <- model_spec %>% fit(formula = formula, data = datc)
-  # extract standard metrics
-  fit_metrics <- predict(fit_Yc, datc) %>%
-    bind_cols(!!outcome := as.vector(datc[[outcome]])) %>%
-    yardstick::metrics(outcome, .pred)
-  predict_Yt <-  predict(fit_Yc, datt)
-  predict_Yc <-  predict(fit_Yc, datc)
-  # observed \overline{\widehat{Y^T(0)}} - \overline{Y^C(0)}
-  pwdelta_obs <-  mean(predict_Yt$.pred, na.rm = TRUE) -
-    mean(predict_Yc$.pred, , na.rm = TRUE)
+  # difference in means -----------------------------------------------------
+  cov_ttest <- diff_in_means(data, covariates, control_i, treat_i)
+  DIM <- cov_ttest$dim
+  # if any missing/errors
+  if(any(is.na(DIM))) stop(paste0("Difference in means could not be calculated for the following covariate(s): ",
+                                  paste0(names(DIM)[is.na(DIM)], collapse = ", ")))
+
+  # prognosis ---------------------------------------------------------------
+  pweights <- pw(data, covariates, treatment, outcome)
+
+  if(any(is.na(pweights))) warning(paste0("Covariate(s) ",
+                                           paste(names(pweights)[is.na(pweights)], collapse = ", "),
+                                           " have missing prognosis coefficients and receive weight of 0 in the prognosis-weighted test statistic."))
+  cov_table <- cbind(prognosis = pweights[covariates], cov_ttest)
+  pwdelta_obs <- sum(cov_table$dim[!is.na(cov_table$prognosis)] * cov_table$prognosis[!is.na(cov_table$prognosis)])
+
+  if(!is.null(model_spec)){
+    # data to fit Yc(0)
+    datc <- data[control_i, c(outcome, covariates)]
+    # data to predict Yt(0)
+    datt <- data[treat_i, c(outcome, covariates)]
+    fit_Yc <- model_spec %>% fit(formula = formula, data = datc)
+    # extract standard metrics
+    fit_metrics <- predict(fit_Yc, datc) %>%
+      bind_cols(!!outcome := as.vector(datc[[outcome]])) %>%
+      yardstick::metrics(outcome, .pred)
+    predict_Yt <-  predict(fit_Yc, datt)
+    predict_Yc <-  predict(fit_Yc, datc)
+    # observed \overline{\widehat{Y^T(0)}} - \overline{Y^C(0)}
+    pwdelta_obs <-  mean(predict_Yt$.pred, na.rm = TRUE) -
+      mean(predict_Yc$.pred, , na.rm = TRUE)
+  }
 
   # bootstrapping -------------------------------------
 
   # resample from control group with replacement
   samples <- get_bootstrap_samples(control_i, length(treat_i), n_bootstraps)
 
-  # standardize bootstrap population relative to control group SD
-  data_stdc <- std_data(data, c(outcome, covariates), treatment)
-
   # obtain delta distribution from bootstrap samples
   pwdelta_from_draw <- function(z) {
 
-    bsample <- data_stdc[z, ]
+    bsample <- data[z, ]
     bsample[[treatment]][1:length(treat_i)] <- 1
 
-    fit_Yc <- model_spec %>%
-      fit(formula = formula,
-          data = bsample[bsample[[treatment]]==0,])
+    if(is.null(model_spec)){
+      # difference in means
+      DIM <- diff_in_means(bsample, covariates, control_i, treat_i)$dim
+      # if any missing/errors
+      if(any(is.na(DIM))) stop(paste0("Difference in means could not be calculated for the following covariate(s): ",
+                                      paste0(names(DIM)[is.na(DIM)], collapse = ", ")))
 
-    predict_Yc <- predict(fit_Yc, bsample[bsample[[treatment]] == 0, ])
-    predict_Yt <-  predict(fit_Yc, bsample[bsample[[treatment]] == 1, ])
-    dY <- mean(predict_Yt$.pred, na.rm = TRUE) -
-      mean(predict_Yc$.pred, na.rm = TRUE)
+      # prognosis coefficients on standardized data
+      bpweights <- pw(bsample, covariates, treatment, outcome)
+
+      # replicate the delta statistic using the same covariate set
+      # as the observed data set
+      dY <- sum(DIM[!is.na(pweights)]*bpweights[!is.na(pweights)])
+
+    } else {
+      fit_Yc <- model_spec %>%
+        fit(formula = formula,
+            data = bsample[bsample[[treatment]]==0,])
+
+      predict_Yc <- predict(fit_Yc, bsample[bsample[[treatment]] == 0, ])
+      predict_Yt <-  predict(fit_Yc, bsample[bsample[[treatment]] == 1, ])
+      dY <- mean(predict_Yt$.pred, na.rm = TRUE) -
+        mean(predict_Yc$.pred, na.rm = TRUE)
+    }
 
     return(list(pwdelta=dY))
   }
 
   bstats <- capture_warnings_apply(samples, 2, pwdelta_from_draw)
 
+  # Identify which elements have NA values
+  has_na <- lapply(bstats, function(x) any(is.na(x$pwdelta)))
+
+  # Filter the bootstraps to remove when returns NA statistics
+  bstats <- bstats[!unlist(has_na)]
+
   # check for completeness and draw additional bootstrap samples if necessary
-  nc_bootstraps <- sum(!is.na(sapply(bstats, function(x) x$pwdelta)))
+  nc_bootstraps <- length(bstats)
 
   while (nc_bootstraps < as.integer(n_bootstraps)) {
+    message("NAs in bootstrap sample statistics. Resampling...")
     add_samples <- get_bootstrap_samples(control_i, length(treat_i), n_bootstraps-nc_bootstraps)
 
     # obtain delta distribution from bootstrap samples
     add_bstats <- capture_warnings_apply(add_samples, 2, pwdelta_from_draw)
 
     bstats <- c(bstats, add_bstats)
-    nc_bootstraps <- sum(!is.na(sapply(bstats, function(x) x$pwdelta)))
+
+    # Identify which elements have NA values
+    has_na <- lapply(bstats, function(x) is.na(x$pwdelta))
+
+    # Filter the bootstraps to remove when returns NA statistics
+    bstats <- bstats[!unlist(has_na)]
+    if(length(bstats) > n_bootstraps) bstats <- bstats[1:n_bootstraps]
+    # check for completeness and draw additional bootstrap samples if necessary
+    nc_bootstraps <- length(bstats)
+
   }
 
   # SE bootstrap distribution
   pwdelta_se <- sd(unlist(sapply(bstats, function(x) x$pwdelta)), na.rm = TRUE) * (n_bootstraps - 1) / n_bootstraps %>% unname
 
-  # always estimate pwdelta from linear model unless model_spec is lm -------
+  # always estimate pwdelta from default sum of weighted difference in means ----
 
   # modify relevant arguments to fit linear regression
-  if(!"linear_reg" %in% class(model_spec)){
-    argg$model_spec <- linear_reg(mode = "regression", engine = "lm")
+  if(!is.null(model_spec)){
+    argg$model_spec <- NULL
     argg$engine <- NULL; argg$formula <- NULL
     argg$recipe <- NULL; argg$cv_auto <- FALSE
     argg$verbose <- FALSE
     argg$subset_workflow <- NULL
-    pwtest_lm <- do.call("pwtest", args = argg)
+    pwtest_lr <- do.call("pwtest", args = argg)
   } else {
-    pwtest_lm <- NULL
+    pwtest_lr <- NULL
   }
 
+  # prognosis R-squared -------------------------------------------------------
 
-  # difference in means -----------------------------------------------------
-  dim_ests <- sapply(covariates, function(x){
-    tres <- t.test(data[treat_i, x], data[control_i, x], na.rm = TRUE)
-    dim <- tres$estimate[1] - tres$estimate[2]
-    return(c(dim = unname(dim), ttest_p = tres$p.value))
-  })
-
-  # prognosis ---------------------------------------------------------------
-  if(is.null(pwtest_lm)) prognosis <- coef(fit_Yc$fit)
-  else prognosis <- coef(pwtest_lm$fit_obj[[1]]$fit)
-
-  if(any(is.na(prognosis))) warning(paste0("Covariate(s) ",
-                                    paste(names(prognosis)[is.na(prognosis)], collapse = ", "),
-                                    " have missing prognosis coefficients and receive weight of 0 in the prognosis-weighted test statistic."))
-
-  cov_table <- t(rbind(prognosis = prognosis[covariates], dim_ests))
+  prog_formula <- as.formula(paste0(outcome, "~", paste(covariates, collapse = "+")))
+  prog_lr <- lm(prog_formula, data = data[control_i,])
+  prog_rsqr <- summary(prog_lr)$r.squared
 
   # balance R-squared -------------------------------------------------------
 
@@ -198,7 +231,7 @@ pwtest <- function(data,
 
   #pwdelta estimates
   est_data <- data.frame(
-    method = class(model_spec)[1],
+    method = ifelse(is.null(model_spec), "default", class(model_spec)[1]),
     engine = ifelse(is.null(engine), "default", engine),
     formula = deparse(formula),
     n_bootstraps = n_bootstraps,
@@ -211,25 +244,21 @@ pwtest <- function(data,
   if(return_uwtest){
     uwdelta <- uwtest(data = data, covariates = covariates, treatment = treatment,
                       outcome = outcome, n_bootstraps = n_bootstraps)
-    est_data <- cbind(
-      est_data,
-      uwdelta[,-1]
-    )
+    est_data <- cbind(est_data, uwdelta[,-1])
   }
 
   # append estimates from linear regression if missing
-  if(!is.null(pwtest_lm)) {
-    est_data <- rbind(est_data, pwtest_lm$estimates)
+  if(!is.null(pwtest_lr)) {
+    est_data <- rbind(est_data, pwtest_lr$estimates)
 
     estimates <- list(
       estimates = est_data,
       cov_table = cov_table,
-      fit_obj = list(pwtest_lm$fit_obj[[1]], fit_Yc),
-      fit_metrics = rbind(
-        pwtest_lm$fit_metrics,
+      fit_obj = list(prog_lr, fit_Yc),
+      fit_metrics = rbind(pwtest_lr$fit_metrics,
         cbind(model = class(model_spec)[1], fit_metrics)
       ),
-      prog_rsqr = pwtest_lm$fit_metrics %>% filter(.metric == "rsq") %>% pull(.estimate),
+      prog_rsqr = prog_rsqr,
       bal_rsqr = bal_rsqr
     )
 
@@ -237,9 +266,12 @@ pwtest <- function(data,
     estimates <- list(
       estimates = est_data,
       cov_table = cov_table,
-      fit_obj = list(fit_Yc),
-      fit_metrics = cbind(model = class(model_spec)[1], fit_metrics),
-      prog_Rsq = fit_metrics %>% filter(.metric == "rsq") %>% pull(.estimate),
+      fit_obj = list(prog_lr),
+      fit_metrics = data.frame(model = "default",
+                               .metric = "rsq",
+                               .estimator = "standard",
+                               .estimate = prog_rsqr),
+      prog_Rsq = prog_rsqr,
       bal_Rsq = bal_rsqr
     )
   }
@@ -265,7 +297,7 @@ pick_winner <- function(data,
                         max_penalty_exp = 6,
                         subset_workflow = NULL,
                         verbose = FALSE
-                        ) {
+) {
 
   ###########################################################################
   # AUTO MODE: Contest selection

@@ -18,15 +18,11 @@ uwtest <- function(data,
   se_type <- match.arg(se_type)
 
   # observed statistics-------------------------------------
-  # list-wise deletion
-  datac <- data[complete.cases(data[,c(outcome,treatment,covariates)]),]
 
-  # standardize data relative to entire study group (the finite population)
+  # standardize data relative to control group SD
+  data <- std_data(data, c(outcome, covariates), treatment)
 
-  data <- datac %>%
-    mutate_at(.vars = c(outcome, covariates),
-              .funs = scale) %>% as.data.frame()
-
+  # index treatment and control rows
   treat_i <- which(data[[treatment]] == 1)
   control_i <- which(data[[treatment]] == 0)
 
@@ -38,17 +34,7 @@ uwtest <- function(data,
                           " are constant in the non-missing control data.")
 
   # difference in means -----------------------------------------------------
-  DIM <- sapply(covariates, function(x) {
-    tryCatch({
-      tres <- t.test(data[treat_i, x], data[control_i, x], na.rm = TRUE)
-      dim <- tres$estimate[1] - tres$estimate[2]
-      return(unname(dim))
-    }, error = function(e) {
-      message(sprintf("Error in t.test for covariate '%s': %s", x, e$message))
-      return(NA)
-    })
-  })
-
+  DIM <- diff_in_means(data, covariates, control_i, treat_i)$dim
 
   # standard errors ---------------------------------------------------------
 
@@ -58,25 +44,25 @@ uwtest <- function(data,
                                    paste(cov_nan, collapse = ", "), ". Consider removing these covariates."))
 
   #analytic standard error
-  Nc <- nrow(datac) # changed from data_uw
-  z0c <- datac[[treatment]] == 0
+  Nc <- nrow(data) # changed from data_uw
+  z0c <- data[[treatment]] == 0
   n1c <- sum(!z0c, na.rm = TRUE)
   n0c <- sum(z0c, na.rm = TRUE)
 
   # analytic standard error of unweighted delta
   if(length(covariates)>1L){
 
-    varcov <- cov(datac[,covariates], use = "everything")
-    sum_sigma2 <- sum(diag(varcov)*(nrow(datac)-1)/nrow(datac))
-    sum_covs <- sum(varcov[upper.tri(varcov)]*(nrow(datac)-1)/nrow(datac))
+    varcov <- cov(data[,covariates], use = "everything")
+    sum_sigma2 <- sum(diag(varcov)*(nrow(data)-1)/nrow(data))
+    sum_covs <- sum(varcov[upper.tri(varcov)]*(nrow(data)-1)/nrow(data))
     multiplier <- ((Nc^2)/(Nc-1))/(n1c*n0c)
 
     # analytic SE
     uwdelta_se <- sqrt(multiplier*sum(sum_sigma2, 2*sum_covs))
 
   } else { # when only one covariate
-    uwdelta_se <- sqrt(var(datac[!z0c,covariates])/n1c +
-                         var(datac[z0c,covariates])/n0c)
+    uwdelta_se <- sqrt(var(data[!z0c,covariates])/n1c +
+                         var(data[z0c,covariates])/n0c)
   }
 
   # bootstrapping -------------------------------------
@@ -84,31 +70,27 @@ uwtest <- function(data,
   # resample from control group with replacement
   samples <- get_bootstrap_samples(control_i, length(treat_i), n_bootstraps)
 
-  # standardize bootstrap population relative to control group SD
-  data_stdc <- std_data(data, c(outcome, covariates), treatment)
-
   # obtain delta distribution from bootstrap samples
   bstats <- apply(samples, 2, function(z) {
-    bsample <- data_stdc[z, ]
+    bsample <- data[z, ]
     bsample[[treatment]][1:length(treat_i)] <- 1
 
     treat_i <- which(bsample[[treatment]] == 1)
     control_i <- which(bsample[[treatment]] == 0)
 
     tryCatch({
-      DIM <- sapply(covariates, function(x){
-        tres <- t.test(bsample[treat_i, x], bsample[control_i, x], na.rm = TRUE)
-        dim <- tres$estimate[1] - tres$estimate[2]
-        return(unname(dim))
-      })
+      DIM <- diff_in_means(data, covariates, control_i, treat_i)$dim
       return(sum(DIM))
-    }, error = function(e) return(NA))
+    }, error = function(e){
+      return(NA)
+    })
   })
 
   # check for completeness and draw additional bootstrap samples if necessary
   nc_bootstraps <- sum(!is.na(bstats))
 
   while (nc_bootstraps < as.integer(n_bootstraps)) {
+    message("NAs in bootstrap sample statistics. Resampling...")
     add_samples <- get_bootstrap_samples(control_i, length(treat_i), n_bootstraps-nc_bootstraps)
 
     # obtain delta distribution from bootstrap samples
@@ -120,13 +102,11 @@ uwtest <- function(data,
       control_i <- which(bsample[[treatment]] == 0)
 
       tryCatch({
-        DIM <- sapply(covariates, function(x){
-          tres <- t.test(bsample[treat_i, x], bsample[control_i, x], na.rm = TRUE)
-          dim <- tres$estimate[1] - tres$estimate[2]
-          return(unname(dim))
-        })
+        DIM <- diff_in_means(data, covariates, control_i, treat_i)$dim
         return(sum(DIM))
-      }, error = function(e) return(NA))
+      }, error = function(e){
+        return(NA)
+      })
     })
 
     bstats <- c(bstats[!is.na(bstats)], add_bstats[!is.na(add_bstats)])

@@ -4,8 +4,25 @@
 
 #' @importFrom stats sd
 stdr <- function(x){
-  (x - mean(x, na.rm = TRUE))/(stats::sd(x, na.rm = TRUE)*(length(x)-1)/length(x))
+  (x - mean(x, na.rm = TRUE))/(stats::sd(x, na.rm = TRUE)*(length(na.omit(x))-1)/length(na.omit(x)))
 }
+
+# Return difference in means from two-tailed t-test
+diff_in_means <- function(data, covariates, control_i, treat_i){
+  out <- sapply(covariates, function(x) {
+  tryCatch({
+    tres <- t.test(data[treat_i, x], data[control_i, x], na.rm = TRUE)
+    dim <- tres$estimate[1] - tres$estimate[2]
+    return(c(dim = unname(dim), ttest_p = tres$p.value))
+  }, error = function(e) {
+    message(sprintf("Error in t.test for covariate '%s': %s", x, e$message))
+    return(c(dim = NA, ttest_p = NA))
+  })
+  })
+  out <- as.data.frame(t(out), row.names = covariates)
+  return(out)
+}
+
 
 capture_warnings_apply <- function(X, MARGIN, FUN, ...) {
   warnings <- character()  # store warning messages
@@ -62,8 +79,7 @@ capture_warnings_apply <- function(X, MARGIN, FUN, ...) {
 pw <- function(data, covariates, treatment, outcome){
 
   # listwise deletion of observations with missing values
-  data_pw <- data %>% tidyr::drop_na(tidyselect::all_of(c(outcome, covariates, treatment)))
-  z0 <- data_pw[[treatment]] == 0
+  z0 <- data[[treatment]] == 0
 
   # standardize control data for prognosis regression
   # data_c <- data_pw %>% dplyr::filter(z0) %>%
@@ -71,7 +87,7 @@ pw <- function(data, covariates, treatment, outcome){
   #                    .funs = stdr) %>% as.data.frame()
 
   # check if variance = 0 and return error
-  temp_data <- data_pw %>%
+  temp_data <- data %>%
     dplyr::select(tidyselect::all_of(c(covariates, outcome)))
   check_var <- apply(temp_data, 2, stats::var, na.rm = TRUE)
   var_na <- names(check_var[is.na(check_var)])
@@ -79,12 +95,12 @@ pw <- function(data, covariates, treatment, outcome){
                                      paste0(var_na, collapse = ", "),
                                      ". Consider an alternative, for example, excluding the covariate(s)."))
   # calculate prognosis weights
-  X <- as.matrix(data_pw[,covariates], ncol = length(covariates))
-  Y <- as.matrix(data_pw[,outcome], ncol = 1)
-  pw <- stats::coef(stats::lm(Y ~ X-1))
+  X <- as.matrix(data[z0,covariates], ncol = length(covariates))
+  Y <- as.matrix(data[z0,outcome], ncol = 1)
+  weights <- stats::coef(stats::lm(Y ~ X))[-1] # remove intercept (0 in expectation)
 
-  names(pw) <- covariates
-  return(pw)
+  names(weights) <- covariates
+  return(weights)
 }
 
 #' Calculates unweighted delta
