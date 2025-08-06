@@ -10,8 +10,6 @@ pw_delta_rdd(
   running_var,
   treatment,
   outcome,
-  standardize = TRUE,
-  simulation = FALSE,
   rd_estimator = "h",
   ...
 )
@@ -27,13 +25,13 @@ pw_delta_rdd(
 
 \item{outcome}{name of outcome variable}
 
-\item{standardize}{logical. Whether to standardize data inside function}
-
-\item{simulation}{logical. Whether running the function on bootstrap sample}
-
 \item{rd_estimator}{character. Whether to use the conventional ("h") or the bias-corrected local-polynomial point estimator ("b"). See \code{rdrobust()} for more details. Defaults to conventional estimate ("h").}
 
 \item{...}{arguments passed on to \code{rdrobust} function. If \code{rdrobust()} arguments \code{y} and \code{covs} are not specified, they will take the values of the variables defined by \code{outcome} and \code{covariates}, respectively. All other arguments, if not specified, will take the default values in \code{rdrobust()}}
+
+\item{standardize}{logical. Whether to standardize data inside function}
+
+\item{simulation}{logical. Whether running the function on bootstrap sample}
 }
 \description{
 Calculates prognosis-weighted delta for RD designs
