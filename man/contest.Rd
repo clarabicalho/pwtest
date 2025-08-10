@@ -11,7 +11,8 @@ contest(
   cv_folds = 5,
   verbose = TRUE,
   min_penalty_exp = -6,
-  max_penalty_exp = -1
+  max_penalty_exp = -1,
+  subset_workflow = NULL
 )
 }
 \arguments{
@@ -28,6 +29,8 @@ contest(
 \item{min_penalty_exp}{minimum penalty exponent (default -6 for more conservative start)}
 
 \item{max_penalty_exp}{maximum penalty exponent (default -1 for small data sets)}
+
+\item{subset_workflow}{character vector containing the labels of workflows to subset the contest on. See Details for more information.}
 }
 \description{
 ML model selection and cross-validation for fitting prognostic-weighted difference in average potential outcomes under control with option to produce comprehensive report
