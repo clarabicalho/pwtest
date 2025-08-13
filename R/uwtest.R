@@ -79,7 +79,7 @@ uwtest <- function(data,
     control_i <- which(bsample[[treatment]] == 0)
 
     tryCatch({
-      DIM <- diff_in_means(data, covariates, control_i, treat_i)$dim
+      DIM <- diff_in_means(bsample, covariates, control_i, treat_i)$dim
       return(sum(DIM))
     }, error = function(e){
       return(NA)
