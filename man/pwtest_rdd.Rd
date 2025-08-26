@@ -10,33 +10,44 @@ pwtest_rdd(
   treatment = "Z",
   running_var = NULL,
   outcome = "Y",
-  n_bootstraps = 500,
-  se_type = "conventional",
+  nsims = 500,
+  oversample = FALSE,
+  se_type = "analytic",
+  simulation = FALSE,
   rd_estimator = "h",
-  return_uwtest = FALSE,
   ...
 )
 }
 \arguments{
 \item{data}{data.frame containing covariates, treatment assignment, and outcome variable}
 
-\item{covariates}{character vector of names of placebo variables. This is not to be confused with \code{covs} argument passed onto \code{rdrobust}, which can be specified separately (\code{...}).}
+\item{covariates}{character vector of names of placebo variables. This is not to be confused with \code{covs} argument passed onto \code{rdrobust} in the case of RD designs, which can be specified separately (\code{...}).}
 
 \item{treatment}{name of variable indicating (binary) treatment assigned}
 
-\item{running_var}{character string with running variable name.}
+\item{running_var}{character string with running variable name. Ignored unless \code{rdd = TRUE}.}
 
 \item{outcome}{name of outcome variable}
 
-\item{n_bootstraps}{numeric scalar indicating number of bootstraps to use for the resampling-based p-values}
+\item{nsims}{numeric scalar indicating number of bootstraps to use for the resampling-based p-values}
 
-\item{se_type}{character string. Determines which type of standard error should be returned. Takes the values of "bootstrap" if estimated from the bootstrap samples, or "conventional", "bias-adjusted", and "robust" standard errors returned by \code{rdrobust}.}
+\item{oversample}{logical value. If \code{FALSE}, function gives resampling-based p-values using number of working bootstrap samples (which did not return an error) and prints a warning when that sample is smaller than the value in \code{nsims}. If \code{oversample = TRUE}, function continues to re-sample until number of working bootstrap samples reaches \code{nsims}.}
+
+\item{se_type}{character string. Determines which type of standard error should be returned with the unweighted delta estimate. Takes the values of either \code{"analytic"} or \code{"bootstrap"} for non RDD cases, and can also take values "conventional", "bias-adjusted", and "robust" standard errors returned by \code{rdrobust} (when \code{rdd = TRUE}). If set to "analytic" in the latter, default results will use conventional standard errors.}
+
+\item{simulation}{logical value.}
 
 \item{rd_estimator}{character. Whether to use the conventional ("h") or the bias-corrected local-polynomial point estimator ("b"). See \code{rdrobust()} for more details. Defaults to conventional estimate ("h").}
 
-\item{return_uwtest}{logical. Whether to return results from unweighted test as well.}
-
 \item{...}{arguments passed onto \code{rdrobust()} function}
+
+\item{rdd}{logical value. Whether test statistics are calculated using continuous RDD approach.}
+
+\item{equivalence}{logical value. If TRUE, carry out equivalence test as described in Hartman and Hidalgo (2018). For a full description of the bootstrapping procedure, see paper.}
+
+\item{equiv_lower}{numerical value. If \code{equivalence = TRUE}, lower bound of the equivalence range as a multiplier for the standard deviation of potential outcomes under control.}
+
+\item{equiv_upper}{numerical value. If \code{equivalence = TRUE}, upper bound of the equivalence range as a multiplier for the standard deviation of potential outcomes under control.}
 }
 \description{
 Produces unweighted and prognosis-weighted test statistics with standard errors and p-values

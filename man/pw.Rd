@@ -4,7 +4,7 @@
 \alias{pw}
 \title{Calculates prognosis weights from observed control-group sample}
 \usage{
-pw(data, covariates, treatment, outcome)
+pw(data, covariates, treatment, outcome, standardize, simulation)
 }
 \arguments{
 \item{data}{data.frame containing covariates, treatment assignment, and outcome variable}
