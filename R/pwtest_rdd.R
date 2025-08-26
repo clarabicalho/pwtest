@@ -25,6 +25,8 @@ pwtest_rdd <- function(data,
                        return_uwtest = FALSE,
                        ...) {
 
+  require(rdrobust)
+
   # REVIEW write warning if specifying differing values for y and outcome, x and treatment
   # write message if set se_type = 'analytic' and rdd = TRUE
 
@@ -34,13 +36,20 @@ pwtest_rdd <- function(data,
   }
 
   # restrict data to variables of interest
-  data <- data[,c(treatment, covariates, outcome, running_var)] %>%
-    tidyr::drop_na()
+  data <- data[,c(treatment, running_var, covariates, outcome)]
 
-  # standardize data relative to entire study group (finite population)
-  data <- data %>%
-    mutate_at(.vars = c(outcome, covariates),
-              .funs = scale) %>% as.data.frame()
+  # index control and treatment rows
+  treat_i <- which(data[[treatment]] == 1)
+  control_i <- which(data[[treatment]] == 0)
+
+  control_data <- data[control_i, c(outcome, covariates)]
+  if (nrow(control_data) == 0) {
+    stop("No control group observations found. Check treatment variable coding.")
+  }
+
+  # standardize data relative to control group SD
+  data <- std_data(data, c(outcome, covariates), treatment)
+
   # observed statistics-------------------------------------
 
   # any arguments not supplied take `pw_delta_rdd` default values
@@ -66,16 +75,11 @@ pwtest_rdd <- function(data,
   # bootstrapping -------------------------------------
 
   # resample from control group with replacement
-  treat_i <- which(data[[treatment]] == 1)
-  control_i <- which(data[[treatment]] == 0)
   samples <- get_bootstrap_samples(control_i, length(treat_i), n_bootstraps)
-
-  # standardize bootstrap population relative to control group SD
-  data_stdc <- std_data(data, c(outcome, covariates), treatment)
 
   # obtain delta distribution from bootstrap samples
   pwdelta_from_draw <- function(z) {
-    bsample <- data_stdc[z, ]
+    bsample <- data[z, ]
     # change treatment condition from control to treatment for bootstrap treatment group
     bsample[[treatment]][1:length(treat_i)] <- 1
 
@@ -148,7 +152,7 @@ pwtest_rdd <- function(data,
     test_type = "continuity",
     n_bootstraps = n_bootstraps,
     uwdelta = pwdelta_obs$uwdelta,
-    uwdelta_se = sd(apply(dii_dist, 2, sum)) * (n_bootstraps - 1) / n_bootstraps,
+    uwdelta_se = sd(rowSums(dii_dist)) * (n_bootstraps - 1) / n_bootstraps,
     uwdelta_p = sum(abs(rowSums(dii_dist)) >= abs(pwdelta_obs$uwdelta)) / n_bootstraps,
     pwdelta = pwdelta_obs$pwdelta,
     pwdelta_se = pwdelta_se,

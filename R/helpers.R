@@ -235,31 +235,25 @@ pw_delta_rdd <- function(data, covariates, running_var, treatment, outcome,
     warning("Arguments `treatment` and `c` both specified, will use `treatment` var to define treatment condition, but `c` will be passed onto `rdrobust()`. Please ensure the values coded in `treatment` are consistent with value of `c`.")
   }
 
-  # # obtain prognostic weights/coefficients for each covariate calculated for
-  # # all control units in the full data
-  # pw_full <- pw(data = data, covariates = covariates, treatment = treatment, outcome = outcome)
-  #
-  # if(any(is.na(pw_full))) stop("Prognosis weights cannot be calculated for the following covariates: ",
-  #                                 paste0(names(pw_full)[is.na(pw_full)], collapse = ", "),
-  #                                 ". Consider removing these covariates or using a different method to calculate prognosis weights.")
-  #
-  # if(length(unique(data[[outcome]]))==1L){
-  #   data <- data %>%
-  #     dplyr::mutate_at(.vars = c(covariates),
-  #                      .funs = stdr) %>% as.data.frame()
-  # }
-  #
-  # # fitted values of Y0 with prognosis weights
-  # # (estimated coefs from control group regression of Y0 on covariates)
-  # Y0hat <- as.matrix(data[,covariates])%*%as.matrix(pw_full, nrow = length(pw_full))
+  # index control and treatment rows
+  treat_i <- which(data[[treatment]] == 1)
+  control_i <- which(data[[treatment]] == 0)
 
-  # data to fit Yc(0)
-  datc <- data[data[,treatment] == 0, c(outcome, covariates)]
-  fit_Yc <- parsnip::linear_reg() %>%
-    parsnip::fit(formula = as.formula(paste0(outcome, "~.")), data = datc)
-  #complete data
-  # data_nona <- as.data.frame(data[,c(outcome, covariates, running_var)]) %>% drop_na
-  Y0hat <- data[,covariates, drop = FALSE] %>% predict(fit_Yc, .) %>% pull
+  # prognosis ---------------------------------------------------------------
+  pweights <- pw(data, covariates, treatment, outcome)
+
+  if(any(is.na(pweights))) warning(paste0("Covariate(s) ",
+                                          paste(names(pweights)[is.na(pweights)], collapse = ", "),
+                                          " have missing prognosis coefficients and receive weight of 0 in the prognosis-weighted test statistic."))
+
+  # fitted values of Y0 with prognosis weights
+  # (estimated coefs from control group regression of Y0 on covariates)
+  # drop covariates with missing weights, see warning above
+  keepcovs <- names(pweights[!is.na(pweights)])
+  Y0hat <- as.matrix(data[,keepcovs, drop = FALSE])%*%as.matrix(pweights[keepcovs], nrow = length(keepcovs))
+
+
+  # observed delta --------------------------------------------------------
 
   # code values for rdrobust arguments
   if(!"y" %in% names(argg)) argg$y <- as.vector(Y0hat)
@@ -267,44 +261,35 @@ pw_delta_rdd <- function(data, covariates, running_var, treatment, outcome,
 
   # rdrobust() inherits arguments from pwtest()
   rd_argg <- intersect(names(argg), names(formals(rdrobust)))
+
   # REVIEW: rdrobust does not take variables in `covariates` for the argument `covs`
   # unless `covs` is specified (separately)
   rd_out <- do.call("rdrobust", args = argg[rd_argg])
 
-  # use the rdrobust output to extract bandwidth and
-  # recalculate weights within the bandwidth
-  # w/in bw: (re)estimate weights, (re)estimate Y0hat, estimate dii
-  argg$h <- rd_out$bws[1,1] # optimal bandwidth
-  cutoff <- ifelse("c" %in% names(argg), argg$c, 0)
-
-  data_bw <- subset(data, data[[running_var]] >= cutoff - argg$h & data[[running_var]] <= cutoff + argg$h)
-  datbwc <- data_bw[data_bw[,treatment] == 0, c(outcome, covariates)]
-  #complete data
-  databw_nona <- as.data.frame(data_bw[,c(outcome, covariates, running_var, treatment)]) %>% drop_na
-  # fitted values of Y0 with prognosis weights within the bandwidth
-  argg$y <- databw_nona[,covariates, drop = FALSE] %>% predict(fit_Yc, .) %>% pull # overwrite outcome with within-bw prognostic weights
-  argg$x <- databw_nona[[running_var]] # overwrite outcome with within-bw prognostic weights
-  rd_argg <- intersect(names(argg), names(formals(rdrobust)))
-
-  # run dii estimation on reweighted (within-bandwidth) fitted Y0hat
-  rd_out <- do.call("rdrobust", args = argg[rd_argg])
-
-  # pw delta as difference in intercepts for Y0hat
-  if(rd_estimator == "h") pwdelta <- unname(rd_out$Estimate[,"tau.us"])
-  if(rd_estimator == "b") pwdelta <- unname(rd_out$Estimate[,"tau.bc"])
-
-  # UW delta estimates using the optimal or user-set bandwidth
+  # optimal if no user-set bandwidth
   if(!rd_estimator %in% names(argg)){
     # Note: if not specified, the conventional or bias-corrected bandwidth passed onto covariate-by-covariate difference in intercepts is taken from the same data used to calculate the prognosis weighted delta
     argg[[rd_estimator]] <- unname(rd_out$bws[rd_estimator,])
   }
+
+  # define cutoff point of rv
+  cutoff <- ifelse("c" %in% names(argg), argg$c, 0)
+
+  # subset data to within optimal or user-specified bandwidth
+  data_bw <- subset(data[,c(outcome, covariates, running_var, treatment)],
+                    data[[running_var]] >= cutoff - argg[[rd_estimator]][1] & data[[running_var]] <= cutoff + argg[[rd_estimator]][2])
+
+  # pw delta as difference in intercepts for Y0hat
+  if(rd_estimator == "h") pwdelta <- unname(rd_out$Estimate[,"tau.us"])
+  if(rd_estimator == "b") pwdelta <- unname(rd_out$Estimate[,"tau.bc"])
 
   # Difference in intercepts for covariates uses the same bandwidth set by user
   # or defaulted in rdrobust() with the fitted Y0hat.
   # All other values are rdrobust defaults if not set by user.
   dii_covs <- sapply(covariates, function(covariate){
     argg_cov <- argg
-    argg_cov$y <- databw_nona[[covariate]]
+    argg_cov$x <- data_bw[[running_var]]
+    argg_cov$y <- data_bw[[covariate]]
     argg_new <- intersect(names(argg), names(formals(rdrobust)))
     rd <- do.call("rdrobust", args = argg_cov[argg_new])
     if(rd_estimator == "h") uwd <- unname(rd$Estimate[,"tau.us"])
@@ -314,15 +299,16 @@ pw_delta_rdd <- function(data, covariates, running_var, treatment, outcome,
 
   # R-squared from prognosis regression
   prog_mod_f <- paste(c(outcome, paste(covariates, collapse = " + ")), collapse = " ~ ")
-  prog_mod <- stats::lm(formula = prog_mod_f, data = databw_nona[databw_nona[[treatment]] == 0, ])
+  prog_mod <- stats::lm(formula = prog_mod_f, data = data_bw[data_bw[[treatment]] == 0, ])
   prog_Rsq <- summary(prog_mod)$r.squared
 
   # R-squared from balance regression
   bal_mod_f <- paste(c(treatment, paste(covariates, collapse = " + ")), collapse = " ~ ")
-  bal_mod <- stats::lm(formula = bal_mod_f, data = databw_nona)
+  bal_mod <- stats::lm(formula = bal_mod_f, data = data_bw)
   bal_Rsq <- summary(bal_mod)$r.squared
 
   return(list(dii = dii_covs,
+              pw = pweights,
               uwdelta = sum(dii_covs),
               pwdelta = pwdelta,
               pwdelta_se = rd_out$se,
