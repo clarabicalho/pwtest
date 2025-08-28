@@ -10,9 +10,6 @@
 #' @param simulation logical value.
 #' @param rdd logical value. Whether test statistics are calculated using continuous RDD approach.
 #' @param rd_estimator character. Whether to use the conventional ("h") or the bias-corrected local-polynomial point estimator ("b"). See `rdrobust()` for more details. Defaults to conventional estimate ("h").
-#' @param equivalence logical value. If TRUE, carry out equivalence test as described in Hartman and Hidalgo (2018). For a full description of the bootstrapping procedure, see paper.
-#' @param equiv_lower numerical value. If `equivalence = TRUE`, lower bound of the equivalence range as a multiplier for the standard deviation of potential outcomes under control.
-#' @param equiv_upper numerical value. If `equivalence = TRUE`, upper bound of the equivalence range as a multiplier for the standard deviation of potential outcomes under control.
 #' @param ... arguments passed onto `rdrobust()` function
 #' @import rdrobust
 #' @importFrom stats pnorm
@@ -25,6 +22,7 @@ pwtest_rdd <- function(data,
                        nsims = 500, oversample = FALSE,
                        se_type = "analytic",
                        simulation = FALSE,
+                       standardize = TRUE,
                        rd_estimator = "h",
                        ...) {
   require(rdrobust)
@@ -40,15 +38,8 @@ pwtest_rdd <- function(data,
     stop("`se_type` must take be set to either 'analytic', 'bootstrap', 'conventional', 'bias-corrected', 'robust'.")
   }
 
-  if(rdd & equivalence) stop("The equivalence test feature is not yet compatible with RDD designs.")
-
   # restrict data to variables of interest
   data <- data %>% dplyr::select(tidyselect::all_of(c(treatment, covariates, running_var, outcome)))
-
-  # set default lower and upper bounds if null
-  # reference value .36*SD of potential outcomes under treatment (see Hartman and Hidalgo 2018)
-  if(equivalence & is.null(equiv_lower)) equiv_lower <- .36;
-  if(equivalence & is.null(equiv_upper)) equiv_upper <- .36;
 
   # observed statistics-------------------------------------
 
@@ -76,10 +67,6 @@ pwtest_rdd <- function(data,
   control_i <- which(data[[treatment]] == 0)
   samples <- get_bootstrap_samples(control_i, length(treat_i), nsims)
 
-  if(equivalence){
-    samples2 <- get_bootstrap_samples(control_i, length(treat_i), nsims)
-  }
-
   # standardize bootstrap population relative to control group SD
   data_stdc <- std_data(data, c(outcome, covariates), treatment)
 
@@ -93,11 +80,6 @@ pwtest_rdd <- function(data,
     dat_pw <- data[z, ]
     # change treatment condition from control to treatment for bootstrap treatment group
     dat_pw[[treatment]][1:length(treat_i)] <- 1
-
-    # permutation under equivalence test (first one-sided test using lower bound)
-    if(equivalence){
-      dat_uw[[outcome]][1:length(treat_i)] <- dat_uw[[outcome]][1:length(treat_i)] - equiv_lower
-    }
 
     bs_t <- dat_pw[[treatment]] == 1
     # invert the running variable for the bootstrap sample of treatment observations
@@ -121,44 +103,12 @@ pwtest_rdd <- function(data,
 
   })
 
-  # repeat procedure for second sample (only applies in equivalence test)
-  if(equivalence){
-
-    delta_sim2 <- apply(samples2, 2, function(z) {
-      dat_uw <- data_stdc[z, ]
-      # change treatment condition from control to treatment for bootstrap treatment group
-      dat_uw[[treatment]][1:length(treat_i)] <- 1
-
-      dat_pw <- data[z, ]
-      # change treatment condition from control to treatment for bootstrap treatment group
-      dat_pw[[treatment]][1:length(treat_i)] <- 1
-
-      # permutation under equivalence test (second one-sided test using upper bound)
-      dat_uw[[outcome]][1:length(treat_i)] <- dat_uw[[outcome]][1:length(treat_i)] + equiv_upper
-
-      uwdelta_sim <- safe_delta(uw_delta, dat_uw, uwdelta_obs, covariates, treatment, outcome, standardize = FALSE)
-      pwdelta_sim <- safe_delta(pw_delta, dat_pw, pwdelta_obs, covariates, treatment, outcome, standardize = TRUE, DIM = uwdelta_sim$dim, simulation = simulation)
-      return(c(uwdelta_sim, pwdelta_sim))
-
-    })
-
-  }
-
   # bootstrap sample checks ----------------------------------
 
   effective_sample <- min(
     sum(!is.na(sapply(delta_sim, function(x) x[["uwdelta"]]))),
     sum(!is.na(sapply(delta_sim, function(x) x[["pwdelta"]])))
   )
-
-  # REVIEW implement resampling in cases
-  # when effective sample of second distribution < nsims and oversample == TRUE
-  if(equivalence){
-    effective_sample2 <- min(
-      sum(!is.na(sapply(delta_sim2, function(x) x[["pwdelta"]]))),
-      sum(!is.na(sapply(delta_sim2, function(x) x[["pwdelta"]])))
-    )
-  }
 
   if (!identical(effective_sample, as.integer(nsims)) & !oversample) {
     warning(paste0("Effective bootstrap sample to calculate delta p-values is of size ", effective_sample, ". Consider changing argument `oversample` to `TRUE`"))
@@ -224,13 +174,13 @@ pwtest_rdd <- function(data,
 
   # p-value (from bootstrap distribution)
   #REVIEW: maybe standardization different between observed and bootstrap???? p-value is 1 for Bohlke
-  if(!rdd | (rdd & se_type == "bootstrap")){
+  if(se_type == "bootstrap"){
     pwdelta_se <- sd(unlist(sapply(delta_sim, function(x) x$pwdelta)), na.rm = TRUE) * (nsims - 1) / nsims
     pw_delta_p <- sum(abs(unlist(sapply(delta_sim, function(x) x$pwdelta))) >= abs(pwdelta_obs$pwdelta), na.rm = TRUE) / effective_sample
 
   }
 
-  if (rdd & se_type %in% c("analytic", "conventional", "bias-corrected", "robust")) {
+  if (se_type %in% c("analytic", "conventional", "bias-corrected", "robust")) {
     pwdelta_se <- switch(se_type,
                          analytic = pwdelta_obs$rdrobust_output$se["Conventional", ],
                          conventional = pwdelta_obs$rdrobust_output$se["Conventional", ],

@@ -76,7 +76,46 @@ capture_warnings_apply <- function(X, MARGIN, FUN, ...) {
 #' @importFrom tidyselect all_of
 #' @importFrom dplyr mutate_at filter
 #' @importFrom stats coef var lm
-pw <- function(data, covariates, treatment, outcome, standardize, simulation){
+pw <- function(data, covariates, treatment, outcome){
+
+  # listwise deletion of observations with missing values
+  z0 <- data[[treatment]] == 0
+
+  # standardize control data for prognosis regression
+  # data_c <- data_pw %>% dplyr::filter(z0) %>%
+  #   dplyr::mutate_at(.vars = c(outcome, covariates),
+  #                    .funs = stdr) %>% as.data.frame()
+
+  # check if variance = 0 and return error
+  temp_data <- data %>%
+    dplyr::select(tidyselect::all_of(c(covariates, outcome)))
+  check_var <- apply(temp_data, 2, stats::var, na.rm = TRUE)
+  var_na <- names(check_var[is.na(check_var)])
+  if(length(var_na)>=1L) stop(paste0("The following variables are constant in the control group among complete cases, so cannot be standardized: ",
+                                     paste0(var_na, collapse = ", "),
+                                     ". Consider an alternative, for example, excluding the covariate(s)."))
+  # calculate prognosis weights
+  X <- as.matrix(data[z0,covariates], ncol = length(covariates))
+  Y <- as.matrix(data[z0,outcome], ncol = 1)
+  weights <- stats::coef(stats::lm(Y ~ X))[-1] # remove intercept (0 in expectation)
+
+  names(weights) <- covariates
+  return(weights)
+}
+
+#'Calculates prognosis weights from observed control-group sample
+#' @param data data.frame containing covariates, treatment assignment, and outcome variable
+#' @param covariates character vector of covariate names
+#' @param treatment name of variable indicating (binary) treatment assigned
+#' @param outcome name of outcome variable
+#' @param standardize whether to standardize data inside function
+#' @param simulation logical. Whether running the function on bootstrap sample
+#' @importFrom magrittr %>%
+#' @importFrom tidyr drop_na
+#' @importFrom tidyselect all_of
+#' @importFrom dplyr mutate_at filter
+#' @importFrom stats coef var lm
+pw_rdd <- function(data, covariates, treatment, outcome, standardize = TRUE, simulation = FALSE){
 
   # listwise deletion of observations with missing values
   data_pw <- data %>% tidyr::drop_na(tidyselect::all_of(c(outcome, covariates, treatment)))

@@ -14,6 +14,7 @@ pwtest_rdd(
   oversample = FALSE,
   se_type = "analytic",
   simulation = FALSE,
+  standardize = TRUE,
   rd_estimator = "h",
   ...
 )
@@ -42,12 +43,6 @@ pwtest_rdd(
 \item{...}{arguments passed onto \code{rdrobust()} function}
 
 \item{rdd}{logical value. Whether test statistics are calculated using continuous RDD approach.}
-
-\item{equivalence}{logical value. If TRUE, carry out equivalence test as described in Hartman and Hidalgo (2018). For a full description of the bootstrapping procedure, see paper.}
-
-\item{equiv_lower}{numerical value. If \code{equivalence = TRUE}, lower bound of the equivalence range as a multiplier for the standard deviation of potential outcomes under control.}
-
-\item{equiv_upper}{numerical value. If \code{equivalence = TRUE}, upper bound of the equivalence range as a multiplier for the standard deviation of potential outcomes under control.}
 }
 \description{
 Produces unweighted and prognosis-weighted test statistics with standard errors and p-values

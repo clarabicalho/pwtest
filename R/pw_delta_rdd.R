@@ -22,7 +22,7 @@ pw_delta_rdd <- function(data, covariates, running_var, treatment, outcome,
 
   # obtain prognostic weights/coefficients for each covariate calculated for
   # all control units in the full data
-  pw_full <- pw(data = data, covariates = covariates, treatment = treatment,
+  pw_full <- pw_rdd(data = data, covariates = covariates, treatment = treatment,
                 outcome = outcome, standardize = standardize, simulation = simulation)
 
   # if(any(is.na(pw_full))) stop()
@@ -63,7 +63,7 @@ pw_delta_rdd <- function(data, covariates, running_var, treatment, outcome,
 
   data_bw <- subset(data, data[[running_var]] >= cutoff - argg$h & data[[running_var]] <= cutoff + argg$h)
 
-  pw_bw <- pw(data = data_bw, covariates = covariates, treatment = treatment,
+  pw_bw <- pw_rdd(data = data_bw, covariates = covariates, treatment = treatment,
               outcome = outcome, standardize = standardize, simulation = simulation)
 
   # fitted values of Y0 with prognosis weights within the bandwidth
