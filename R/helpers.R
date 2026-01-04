@@ -8,18 +8,25 @@ stdr <- function(x){
 }
 
 # Return difference in means from two-tailed t-test
-diff_in_means <- function(data, covariates, control_i, treat_i){
+diff_in_means <- function(data, covariates, control_i, treat_i, dim_only = FALSE){
   out <- sapply(covariates, function(x) {
   tryCatch({
-    tres <- t.test(data[treat_i, x], data[control_i, x], na.rm = TRUE)
-    dim <- tres$estimate[1] - tres$estimate[2]
-    return(c(dim = unname(dim), ttest_p = tres$p.value))
+    dim <- mean(data[treat_i, x], na.rm = TRUE) - mean(data[control_i, x], na.rm = TRUE)
+    if(!dim_only){
+      tres <- t.test(data[treat_i, x], data[control_i, x], na.rm = TRUE)
+      return(c(dim = unname(dim), ttest_p = tres$p.value))
+    } else {
+      return(c(dim = unname(dim)))
+    }
   }, error = function(e) {
     message(sprintf("Error in t.test for covariate '%s': %s", x, e$message))
     return(c(dim = NA, ttest_p = NA))
   })
   })
-  out <- as.data.frame(t(out), row.names = covariates)
+  if(!dim_only) out <- as.data.frame(t(out), row.names = covariates)
+  else{
+    out <- data.frame(dim = unname(out), row.names = covariates)
+  }
   return(out)
 }
 
@@ -102,6 +109,59 @@ pw <- function(data, covariates, treatment, outcome){
   names(weights) <- covariates
   return(weights)
 }
+
+#'Calculates prognosis weights from observed control-group sample
+#' @param data data.frame containing covariates, treatment assignment, and outcome variable
+#' @param covariates character vector of covariate names
+#' @param treatment name of variable indicating (binary) treatment assigned
+#' @param outcome name of outcome variable
+#' @param standardize whether to standardize data inside function
+#' @param simulation logical. Whether running the function on bootstrap sample
+#' @importFrom magrittr %>%
+#' @importFrom tidyr drop_na
+#' @importFrom tidyselect all_of
+#' @importFrom dplyr mutate_at filter
+#' @importFrom stats coef var lm
+pw_rdd <- function(data, covariates, treatment, outcome, standardize = TRUE, simulation = FALSE){
+
+  # listwise deletion of observations with missing values
+  data_pw <- data %>% tidyr::drop_na(tidyselect::all_of(c(outcome, covariates, treatment)))
+  z0 <- data_pw[[treatment]] == 0
+
+  # standardize control data for prognosis regression
+  if(standardize){
+    if(simulation & length(unique(data[[outcome]]))==1L){
+      # standardize -covariates only- in simulation runs with fixed POs
+      data_c <- data_pw %>% dplyr::filter(z0) %>%
+        dplyr::mutate_at(.vars = c(covariates),
+                         .funs = stdr) %>% as.data.frame()
+    } else {
+      data_c <- data_pw %>% dplyr::filter(z0) %>%
+        dplyr::mutate_at(.vars = c(outcome, covariates),
+                         .funs = stdr) %>% as.data.frame()
+    }
+
+  } else {
+    data_c <- data_pw %>% dplyr::filter(z0)
+  }
+
+  # check if variance = 0 and return error
+  check_var <- data_c %>%
+    dplyr::select(tidyselect::all_of(c(covariates, outcome))) %>%
+    apply(., 2, var, na.rm = TRUE)
+  var_na <- names(check_var[is.na(check_var)])
+  if(length(var_na)>=1L) stop(paste0("The following variables are constant in the control group among complete cases, so cannot be standardized: ",
+                                     paste0(var_na, collapse = ", "),
+                                     ". Consider an alternative, for example, excluding the covariate(s)."))
+  # calculate prognosis weights
+  X <- as.matrix(data_c[,covariates], ncol = length(covariates))
+  Y <- as.matrix(data_c[,outcome], ncol = 1)
+  pw <- coef(lm(Y ~ X-1))
+
+  names(pw) <- covariates
+  return(pw)
+}
+
 
 #' Calculates unweighted delta
 #' @param data data.frame containing covariates, treatment assignment, and outcome variable
@@ -210,125 +270,6 @@ pw_delta <- function(data, covariates, treatment, outcome, standardize = TRUE,
               pwdelta = pwdelta,
               prog_Rsq = prog_Rsq,
               bal_Rsq = bal_Rsq))
-
-}
-
-#' Calculates prognosis-weighted delta for RD designs
-#' @param data data.frame containing covariates, treatment assignment, and outcome variable
-#' @param covariates character vector of covariate names
-#' @param running_var character string with running variable name
-#' @param treatment name of variable indicating (binary) treatment assigned
-#' @param outcome name of outcome variable
-#' @param standardize logical. Whether to standardize data inside function
-#' @param simulation logical. Whether running the function on bootstrap sample
-#' @param rd_estimator character. Whether to use the conventional ("h") or the bias-corrected local-polynomial point estimator ("b"). See `rdrobust()` for more details. Defaults to conventional estimate ("h").
-#' @param ... arguments passed on to `rdrobust` function. If `rdrobust()` arguments `y` and `covs` are not specified, they will take the values of the variables defined by `outcome` and `covariates`, respectively. All other arguments, if not specified, will take the default values in `rdrobust()`
-#' @import rdrobust
-
-pw_delta_rdd <- function(data, covariates, running_var, treatment, outcome,
-                         rd_estimator = "h", ...){
-
-  argg <- as.list(match.call())
-  c <- NULL
-
-  if("c" %in% names(argg)){
-    warning("Arguments `treatment` and `c` both specified, will use `treatment` var to define treatment condition, but `c` will be passed onto `rdrobust()`. Please ensure the values coded in `treatment` are consistent with value of `c`.")
-  }
-
-  # # obtain prognostic weights/coefficients for each covariate calculated for
-  # # all control units in the full data
-  # pw_full <- pw(data = data, covariates = covariates, treatment = treatment, outcome = outcome)
-  #
-  # if(any(is.na(pw_full))) stop("Prognosis weights cannot be calculated for the following covariates: ",
-  #                                 paste0(names(pw_full)[is.na(pw_full)], collapse = ", "),
-  #                                 ". Consider removing these covariates or using a different method to calculate prognosis weights.")
-  #
-  # if(length(unique(data[[outcome]]))==1L){
-  #   data <- data %>%
-  #     dplyr::mutate_at(.vars = c(covariates),
-  #                      .funs = stdr) %>% as.data.frame()
-  # }
-  #
-  # # fitted values of Y0 with prognosis weights
-  # # (estimated coefs from control group regression of Y0 on covariates)
-  # Y0hat <- as.matrix(data[,covariates])%*%as.matrix(pw_full, nrow = length(pw_full))
-
-  # data to fit Yc(0)
-  datc <- data[data[,treatment] == 0, c(outcome, covariates)]
-  fit_Yc <- parsnip::linear_reg() %>%
-    parsnip::fit(formula = as.formula(paste0(outcome, "~.")), data = datc)
-  #complete data
-  # data_nona <- as.data.frame(data[,c(outcome, covariates, running_var)]) %>% drop_na
-  Y0hat <- data[,covariates, drop = FALSE] %>% predict(fit_Yc, .) %>% pull
-
-  # code values for rdrobust arguments
-  if(!"y" %in% names(argg)) argg$y <- as.vector(Y0hat)
-  if(!"x" %in% names(argg)) argg$x <- as.vector(data[[running_var]])
-
-  # rdrobust() inherits arguments from pwtest()
-  rd_argg <- intersect(names(argg), names(formals(rdrobust)))
-  # REVIEW: rdrobust does not take variables in `covariates` for the argument `covs`
-  # unless `covs` is specified (separately)
-  rd_out <- do.call("rdrobust", args = argg[rd_argg])
-
-  # use the rdrobust output to extract bandwidth and
-  # recalculate weights within the bandwidth
-  # w/in bw: (re)estimate weights, (re)estimate Y0hat, estimate dii
-  argg$h <- rd_out$bws[1,1] # optimal bandwidth
-  cutoff <- ifelse("c" %in% names(argg), argg$c, 0)
-
-  data_bw <- subset(data, data[[running_var]] >= cutoff - argg$h & data[[running_var]] <= cutoff + argg$h)
-  datbwc <- data_bw[data_bw[,treatment] == 0, c(outcome, covariates)]
-  #complete data
-  databw_nona <- as.data.frame(data_bw[,c(outcome, covariates, running_var, treatment)]) %>% drop_na
-  # fitted values of Y0 with prognosis weights within the bandwidth
-  argg$y <- databw_nona[,covariates, drop = FALSE] %>% predict(fit_Yc, .) %>% pull # overwrite outcome with within-bw prognostic weights
-  argg$x <- databw_nona[[running_var]] # overwrite outcome with within-bw prognostic weights
-  rd_argg <- intersect(names(argg), names(formals(rdrobust)))
-
-  # run dii estimation on reweighted (within-bandwidth) fitted Y0hat
-  rd_out <- do.call("rdrobust", args = argg[rd_argg])
-
-  # pw delta as difference in intercepts for Y0hat
-  if(rd_estimator == "h") pwdelta <- unname(rd_out$Estimate[,"tau.us"])
-  if(rd_estimator == "b") pwdelta <- unname(rd_out$Estimate[,"tau.bc"])
-
-  # UW delta estimates using the optimal or user-set bandwidth
-  if(!rd_estimator %in% names(argg)){
-    # Note: if not specified, the conventional or bias-corrected bandwidth passed onto covariate-by-covariate difference in intercepts is taken from the same data used to calculate the prognosis weighted delta
-    argg[[rd_estimator]] <- unname(rd_out$bws[rd_estimator,])
-  }
-
-  # Difference in intercepts for covariates uses the same bandwidth set by user
-  # or defaulted in rdrobust() with the fitted Y0hat.
-  # All other values are rdrobust defaults if not set by user.
-  dii_covs <- sapply(covariates, function(covariate){
-    argg_cov <- argg
-    argg_cov$y <- databw_nona[[covariate]]
-    argg_new <- intersect(names(argg), names(formals(rdrobust)))
-    rd <- do.call("rdrobust", args = argg_cov[argg_new])
-    if(rd_estimator == "h") uwd <- unname(rd$Estimate[,"tau.us"])
-    if(rd_estimator == "b") uwd <- unname(rd$Estimate[,"tau.bc"])
-    return(uwd)
-  })
-
-  # R-squared from prognosis regression
-  prog_mod_f <- paste(c(outcome, paste(covariates, collapse = " + ")), collapse = " ~ ")
-  prog_mod <- stats::lm(formula = prog_mod_f, data = databw_nona[databw_nona[[treatment]] == 0, ])
-  prog_Rsq <- summary(prog_mod)$r.squared
-
-  # R-squared from balance regression
-  bal_mod_f <- paste(c(treatment, paste(covariates, collapse = " + ")), collapse = " ~ ")
-  bal_mod <- stats::lm(formula = bal_mod_f, data = databw_nona)
-  bal_Rsq <- summary(bal_mod)$r.squared
-
-  return(list(dii = dii_covs,
-              uwdelta = sum(dii_covs),
-              pwdelta = pwdelta,
-              pwdelta_se = rd_out$se,
-              prog_Rsq = prog_Rsq,
-              bal_Rsq = bal_Rsq,
-              rdrobust_output = rd_out))
 
 }
 
