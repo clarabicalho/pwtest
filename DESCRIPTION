@@ -5,9 +5,9 @@ Authors@R:
     c(person("Clara", "Bicalho", , "clarabmcorreia@gmail.com", role = c("aut", "cre"),
            comment = c(ORCID = "0000-0002-9298-550X")),
     person("Thad", "Dunning", , "thad.dunning@berkeley.edu", role = c("aut"),
-           comment = c(ORCID = "")),
+           comment = c(ORCID = "0000-0003-2757-9000")),
     person("Adam", "Bouyamourn", , "adam.bouyamourn@berkeley.edu", role = c("aut"),
-           comment = c(ORCID = "")))
+           comment = c(ORCID = "0000-0002-2073-2132")))
 Description: This package and function by the same name implements a prognosis-weighted global test of independence of treatment assignment and potential outcomes.
 License: MIT + file LICENSE
 Encoding: UTF-8
