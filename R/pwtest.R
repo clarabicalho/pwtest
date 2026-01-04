@@ -142,7 +142,7 @@ pwtest <- function(data,
 
     if(is.null(model_spec)){
       # difference in means
-      DIM <- diff_in_means(bsample, covariates, control_i, treat_i)$dim
+      DIM <- diff_in_means(bsample, covariates, control_i, treat_i, dim_only = TRUE)$dim
       # if any missing/errors
       if(any(is.na(DIM))) stop(paste0("Difference in means could not be calculated for the following covariate(s): ",
                                       paste0(names(DIM)[is.na(DIM)], collapse = ", ")))

@@ -8,18 +8,25 @@ stdr <- function(x){
 }
 
 # Return difference in means from two-tailed t-test
-diff_in_means <- function(data, covariates, control_i, treat_i){
+diff_in_means <- function(data, covariates, control_i, treat_i, dim_only = FALSE){
   out <- sapply(covariates, function(x) {
   tryCatch({
-    tres <- t.test(data[treat_i, x], data[control_i, x], na.rm = TRUE)
-    dim <- tres$estimate[1] - tres$estimate[2]
-    return(c(dim = unname(dim), ttest_p = tres$p.value))
+    dim <- mean(data[treat_i, x], na.rm = TRUE) - mean(data[control_i, x], na.rm = TRUE)
+    if(!dim_only){
+      tres <- t.test(data[treat_i, x], data[control_i, x], na.rm = TRUE)
+      return(c(dim = unname(dim), ttest_p = tres$p.value))
+    } else {
+      return(c(dim = unname(dim)))
+    }
   }, error = function(e) {
     message(sprintf("Error in t.test for covariate '%s': %s", x, e$message))
     return(c(dim = NA, ttest_p = NA))
   })
   })
-  out <- as.data.frame(t(out), row.names = covariates)
+  if(!dim_only) out <- as.data.frame(t(out), row.names = covariates)
+  else{
+    out <- data.frame(dim = unname(out), row.names = covariates)
+  }
   return(out)
 }
 
