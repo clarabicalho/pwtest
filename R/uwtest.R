@@ -34,7 +34,7 @@ uwtest <- function(data,
                           " are constant in the non-missing control data.")
 
   # difference in means -----------------------------------------------------
-  DIM <- diff_in_means(data, covariates, control_i, treat_i)$dim
+  DIM <- diff_in_means(data, covariates, control_i, treat_i, TRUE)$dim
 
   # standard errors ---------------------------------------------------------
 
@@ -95,14 +95,14 @@ uwtest <- function(data,
 
     # obtain delta distribution from bootstrap samples
     add_bstats <- apply(add_samples, 2, function(z) {
-      bsample <- data_stdc[z, ]
+      bsample <- data[z, ]
       bsample[[treatment]][1:length(treat_i)] <- 1
 
       treat_i <- which(bsample[[treatment]] == 1)
       control_i <- which(bsample[[treatment]] == 0)
 
       tryCatch({
-        DIM <- diff_in_means(data, covariates, control_i, treat_i)$dim
+        DIM <- diff_in_means(bsample, covariates, control_i, treat_i, TRUE)$dim
         return(sum(DIM))
       }, error = function(e){
         return(NA)
