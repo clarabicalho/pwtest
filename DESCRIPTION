@@ -2,7 +2,7 @@ Package: pwtest
 Title: Prognosis-Weighted Test
 Version: 0.0.0.9000
 Authors@R: 
-    c(person("Clara", "Bicalho", , "clarabmcorreia@gmail.com", role = c("aut", "cre"),
+   c(person("Clara", "Bicalho", , "clarabmcorreia@gmail.com", role = c("aut", "cre"),
            comment = c(ORCID = "0000-0002-9298-550X")),
     person("Thad", "Dunning", , "thad.dunning@berkeley.edu", role = c("aut"),
            comment = c(ORCID = "0000-0003-2757-9000")),
