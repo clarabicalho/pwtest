@@ -11,8 +11,8 @@ Standard covariate-by-covariate tests in natural experiments can lead to false r
 You can install the development version of **pwtest** from GitHub with:
 
 ```r
-# install.packages("remotes")
-remotes::install_github("clarabicalho/pwtest")
+# install.packages("pak") # install if needed
+pak::pak("clarabicalho/pwtest")
 ```
 
 ## Main functions
